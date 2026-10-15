@@ -95,18 +95,19 @@ fn choose_level(cfg: &EncoderConfig) -> Option<u8> {
         (18, 35_651_584, 16_384, 8704, 4_278_190_080, 160_000),
     ];
     let pixels = u64::from(cfg.width).checked_mul(u64::from(cfg.height))?;
-    let rate = u128::from(pixels)
-        .checked_mul(u128::from(cfg.fps_num))?
-        .checked_add(u128::from(cfg.fps_den.checked_sub(1)?))?
-        .checked_div(u128::from(cfg.fps_den))?;
+    let rate =
+        u128::from(pixels).checked_mul(u128::from(cfg.fps_num))?.checked_add(u128::from(cfg.fps_den.checked_sub(1)?))?.checked_div(u128::from(cfg.fps_den))?;
     let peak_kbps = match cfg.rate_control {
         Some(RateControl::Cbr { kbps }) => kbps,
         Some(RateControl::Vbr { max_kbps, .. }) => max_kbps,
         _ => 0,
     };
-    LEVELS.iter().find(|&&(_, max_pixels, max_width, max_height, max_rate, max_kbps)| {
-        pixels <= max_pixels && cfg.width <= max_width && cfg.height <= max_height && rate <= u128::from(max_rate) && peak_kbps <= max_kbps
-    }).map(|entry| entry.0)
+    LEVELS
+        .iter()
+        .find(|&&(_, max_pixels, max_width, max_height, max_rate, max_kbps)| {
+            pixels <= max_pixels && cfg.width <= max_width && cfg.height <= max_height && rate <= u128::from(max_rate) && peak_kbps <= max_kbps
+        })
+        .map(|entry| entry.0)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
