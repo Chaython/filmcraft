@@ -233,12 +233,7 @@ impl Exporter {
         // HDR sequences export HDR (H.264 / ProRes / DNxHR / APV, and H.265 where a registered encoder
         // writes Main 10) unless SDR is asked for; elsewhere H.265 is tone-mapped 8-bit SDR
         let pipe = q.settings.color;
-        let hdr_out = hdr_output(
-            pipe.working.is_hdr(),
-            settings.sdr || av1_software_sdr(settings),
-            settings.video_format(),
-            crate::hdr_available,
-        );
+        let hdr_out = hdr_output(pipe.working.is_hdr(), settings.sdr || av1_software_sdr(settings), settings.video_format(), crate::hdr_available);
         let mut settings = settings.clone();
         settings.signal = match (hdr_out, pipe.working) {
             (true, filmcraft_color::WorkingSpace::Rec2100Pq) => ColorSignal::PQ,
