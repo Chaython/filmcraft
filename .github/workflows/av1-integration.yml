@@ -32,6 +32,10 @@ jobs:
         run: cargo check -p filmcraft-av1 -p filmcraft-av1enc -p filmcraft-codecs -p filmcraft-export -p filmcraft-platform --all-targets
       - name: AV1 decoder / encoder unit tests
         run: cargo test -p filmcraft-av1 -p filmcraft-av1enc --lib
+      - name: AV1 software MP4 and residual round-trip tests
+        run: cargo test -p filmcraft-av1enc --test mp4_roundtrip --test residual_decode
+      - name: AV1 export presets and fallback tests
+        run: cargo test -p filmcraft-export --lib av1
       - name: AV1 integration and pixel format tests
         run: cargo test -p filmcraft-codecs --lib
       - name: Strict lint on changed crates
