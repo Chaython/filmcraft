@@ -322,7 +322,17 @@ impl FfmpegAv1Encoder {
                 cmd.arg("-b:v").arg(format!("{}k", self.bitrate_kbps));
             }
         }
-        let result = cmd.args(["-f", "ivf"]).arg(&self.ivf_path).output().map_err(|e| ExportError::Encode(format!("cannot launch FFmpeg/libaom: {e}")))?;
+        // libaom does not consistently copy the input stream's color fields into the
+        // AV1 sequence header. Rewrite those fields inside the actual encoded bitstream;
+        // av1_config() below then independently validates them before MP4 finalization.
+        let bsf = format!(
+            "av1_metadata=color_primaries={}:transfer_characteristics={}:matrix_coefficients={}:color_range={}",
+            self.signal.primaries,
+            self.signal.transfer,
+            self.signal.matrix,
+            u8::from(self.full_range)
+        );
+        let result = cmd.args(["-bsf:v"]).arg(bsf).args(["-f", "ivf"]).arg(&self.ivf_path).output().map_err(|e| ExportError::Encode(format!("cannot launch FFmpeg/libaom: {e}")))?;
         if !result.status.success() {
             return Err(ExportError::Encode(format!(
                 "FFmpeg/libaom AV1 export failed (format {}): {}",
