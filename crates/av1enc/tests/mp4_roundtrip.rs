@@ -53,12 +53,8 @@ fn test_av1enc_mp4_mux_and_decode() {
     if std::process::Command::new("ffmpeg").arg("-version").output().is_ok_and(|o| o.status.success()) {
         let path = filmcraft_testkit::temp_path(&filmcraft_testkit::fixtures_dir("av1enc-external-oracle").join("flat-main.mp4"));
         std::fs::write(&path, &mp4_bytes).unwrap();
-        let decoded = std::process::Command::new("ffmpeg")
-            .args(["-hide_banner", "-v", "error", "-xerror", "-i"])
-            .arg(&path)
-            .args(["-f", "null", "-"])
-            .output()
-            .unwrap();
+        let decoded =
+            std::process::Command::new("ffmpeg").args(["-hide_banner", "-v", "error", "-xerror", "-i"]).arg(&path).args(["-f", "null", "-"]).output().unwrap();
         let _ = std::fs::remove_file(&path);
         assert!(decoded.status.success(), "independent ffmpeg AV1 decode failed: {}", String::from_utf8_lossy(&decoded.stderr));
     } else {
