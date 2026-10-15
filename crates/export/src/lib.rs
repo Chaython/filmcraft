@@ -1775,7 +1775,8 @@ impl VideoEncoder for Av1Encoder {
         if f.hdr.is_some() {
             return Err(ExportError::Unsupported("software AV1 requires SDR input; tone-map HDR before encoding".into()));
         }
-        let expected_len = usize::try_from(self.w).ok().and_then(|w| usize::try_from(self.h).ok().and_then(|h| w.checked_mul(h))).and_then(|pixels| pixels.checked_mul(4));
+        let expected_len =
+            usize::try_from(self.w).ok().and_then(|w| usize::try_from(self.h).ok().and_then(|h| w.checked_mul(h))).and_then(|pixels| pixels.checked_mul(4));
         if expected_len.is_none_or(|needed| f.rgba.len() < needed) {
             return Err(ExportError::Unsupported("software AV1 RGBA input is shorter than the requested frame size".into()));
         }
