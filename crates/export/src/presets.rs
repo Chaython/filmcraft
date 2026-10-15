@@ -53,7 +53,7 @@ fn av1(size: Option<(u32, u32)>, kbps: u32, max_kbps: u32) -> ExportSettings {
         bitrate_kbps: kbps,
         max_bitrate_kbps: Some(max_kbps),
         bitrate_mode: BitrateMode::Vbr1Pass,
-        audio: AudioSettings { codec: AudioCodec::Aac, sample_rate: Some(48_000), channels: 2, bitrate_kbps: 320, bits: 16 },
+        audio: AudioSettings { codec: AudioCodec::Aac, sample_rate: Some(48_000), channels: 2, bitrate_kbps: 320, bits: 16, ..Default::default() },
         ..Default::default()
     }
 }
