@@ -301,6 +301,9 @@ fn hevc_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<R
 /// The AV1 side of [`factory`]: FilmCraft's hardware AV1 encoder on Windows, so the Hardware encoding toggle
 /// does not apply and a request NVENC cannot take is an error, not a fall-through.
 fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Result<Box<dyn VideoEncoder>>> {
+    if s.hardware_encoding == HardwareEncoding::Off {
+        return None;
+    }
     let declined = |why: &str| {
         log::info!("hardware AV1 encoding declined: {why}");
         filmcraft_export::note_hw_encode_declined();
@@ -308,6 +311,10 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
     };
     let cfg = match config(Format::Av1, w, h, rate, s) {
         Ok(c) => c,
+        Err(why) if !s.signal.is_hdr() => {
+            log::info!("NVENC AV1 declined; trying the SDR software encoder: {why}");
+            return None;
+        }
         Err(why) => return declined(&why),
     };
     match open(&cfg, &nvenc_signal(&s.signal)) {
@@ -318,6 +325,10 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
         // no AV1 encoder here at all: not a hardware attempt, the export's own "encoder not available" error
         Err(why) if !super::av1_available() => {
             log::info!("no hardware AV1 encoder: {why}");
+            None
+        }
+        Err(why) if !s.signal.is_hdr() => {
+            log::info!("NVENC AV1 session unavailable; trying the SDR software encoder: {why}");
             None
         }
         Err(why) => declined(&why),

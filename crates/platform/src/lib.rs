@@ -98,44 +98,16 @@ pub fn register() -> Availability {
         filmcraft_export::register_hdr_probe(filmcraft_export::Format::Av1, nvenc::av1_hdr_available);
         nvenc::warm_hevc_probe();
         nvenc::warm_av1_probe();
-        // AMF / QSV are imported from upstream but need driver-specific acceptance.
-        // Explicit opt-in avoids exposing unvalidated hardware paths to ordinary users.
-        if std::env::var_os("FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS").as_deref() == Some(std::ffi::OsStr::new("1")) {
-            for (format, probe) in [
-                (filmcraft_export::Format::Hevc, amf::hevc_available as fn() -> bool),
-                (filmcraft_export::Format::Av1, amf::av1_available as fn() -> bool),
-                (filmcraft_export::Format::Hevc, qsv::hevc_available as fn() -> bool),
-                (filmcraft_export::Format::Av1, qsv::av1_available as fn() -> bool),
-            ] {
-                filmcraft_export::register_format_probe(format, probe);
-            }
-            for (format, probe) in [
-                (filmcraft_export::Format::Hevc, amf::hevc_hdr_available as fn() -> bool),
-                (filmcraft_export::Format::Av1, amf::av1_hdr_available as fn() -> bool),
-                (filmcraft_export::Format::Hevc, qsv::hevc_hdr_available as fn() -> bool),
-                (filmcraft_export::Format::Av1, qsv::av1_hdr_available as fn() -> bool),
-            ] {
-                filmcraft_export::register_hdr_probe(format, probe);
-            }
-            amf::warm_hevc_probe();
-            amf::warm_av1_probe();
-            qsv::warm_hevc_probe();
-            qsv::warm_av1_probe();
-        }
+        // AMF / QSV sources are staged but not registered. Their factories do not yet
+        // provide verified av1C/hvcC data when the MP4 muxer constructs its track.
+        // Advertising them here would risk malformed or mislabeled output.
     }
     #[cfg(target_os = "windows")]
     {
         static ENCODERS: std::sync::Once = std::sync::Once::new();
         // Export ▸ Hardware encoding (NVENC H.264): in front of the software encoder, taking an
         // export only when asked for and when NVENC can do it
-        ENCODERS.call_once(|| {
-            if std::env::var_os("FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS").as_deref() == Some(std::ffi::OsStr::new("1")) {
-                // Registration prepends factories: NVENC last keeps established NVIDIA preference.
-                filmcraft_export::register_encoder(qsv::export::factory);
-                filmcraft_export::register_encoder(amf::export::factory);
-            }
-            filmcraft_export::register_encoder(nvenc::export::factory);
-        });
+        ENCODERS.call_once(|| filmcraft_export::register_encoder(nvenc::export::factory));
         filmcraft_codecs::register_video_decoder(media_foundation_factory);
         filmcraft_codecs::hw::set_hw_backend("Media Foundation");
         Availability::Available("Media Foundation")

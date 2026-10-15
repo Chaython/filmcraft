@@ -709,7 +709,7 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     (false, _) => tl!("Main (8-bit)"),
                 };
                 row(ui, t, tl!("Profile"), |ui| ui.label(label));
-                row(ui, t, tl!("Encoder"), |ui| ui.label(tl!("Hardware (Auto) / Software fallback (8-bit)")));
+                row(ui, t, tl!("Encoder"), |ui| ui.label(tl!("Hardware (Auto) / Software 8-bit SDR")));
             } else {
                 row(ui, t, tl!("Profile"), |ui| {
                     let o = [H264Profile::Baseline, H264Profile::Main, H264Profile::High];
@@ -729,10 +729,11 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                 });
             }
             row(ui, t, tl!("Bitrate Encoding"), |ui| {
-                // a hardware encoder has one pass and no constant-quality mode: H.265 offers neither
+                // AV1 CRF uses the software encoder; NVENC/AMF/QSV may decline that mode.
                 let o = [BitrateMode::Cbr, BitrateMode::Vbr1Pass, BitrateMode::Vbr2Pass, BitrateMode::Crf];
-                let labels: Vec<(String, bool)> =
-                    o.iter().map(|m| (m.label().to_string(), !((hevc || av1) && matches!(m, BitrateMode::Vbr2Pass | BitrateMode::Crf)))).collect();
+                let labels: Vec<(String, bool)> = o.iter().map(|m| {
+                    (m.label().to_string(), !((hevc && matches!(m, BitrateMode::Vbr2Pass | BitrateMode::Crf)) || (av1 && matches!(m, BitrateMode::Vbr2Pass))))
+                }).collect();
                 if let Some(i) = combo(ui, reg, "export.video.bitrateMode", s.bitrate_mode.label(), &labels, 140.0) {
                     s.bitrate_mode = o[i];
                 }
@@ -783,8 +784,8 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             // The system's hardware encoder where there is one (VideoToolbox on macOS, NVENC on NVIDIA
             // GPUs on Windows, VA-API on Linux); everything it does not take (two-pass, HDR, MXF) and
             // every machine without one keeps the built-in encoder.
-            // H.265 and AV1 have only hardware encoders: choosing the format is the opt-in.
-            if !hevc && !av1 {
+            // AV1 has an 8-bit SDR software fallback; HEVC remains hardware-only.
+            if !hevc {
                 row(ui, t, "Hardware Encoding", |ui| {
                     let mut on = s.hardware_encoding == HardwareEncoding::Auto;
                     if check(ui, reg, "export.video.hardwareEncoding", &mut on, "Use the hardware encoder when available") {
