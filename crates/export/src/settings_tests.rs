@@ -997,6 +997,42 @@ fn av1_mkv_muxer_preserves_video_and_aac_without_transcoding() {
 }
 
 #[test]
+fn av1_mkv_high_bitdepth_444_roundtrip() {
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "FFmpeg is required for 12-bit MKV CI");
+        return;
+    }
+    let (p, seq, sources) = matte([0.2, 0.7, 0.4, 1.0], 160, 96, None);
+    let temp = Scratch::new("av1-mkv-444");
+    let path = temp.path("professional-12bit.mkv");
+    let settings = ExportSettings {
+        format: Format::Av1,
+        multiplexer: Multiplexer::Mkv,
+        av1_pixel_format: Av1PixelFormat::Yuv444p12,
+        bitrate_mode: BitrateMode::Crf,
+        crf: 35.0,
+        include_audio: false,
+        path: path.clone(),
+        range: Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(3))),
+        ..Default::default()
+    };
+    let result = export(&p, seq, &settings, &sources, &Progress::default()).expect("12-bit AV1 MKV export");
+    assert_eq!(result.frames, 3);
+    let probe = ffprobe_json(&["-show_entries", "stream=codec_name,codec_type,pix_fmt"], &path).expect("ffprobe 12-bit Matroska");
+    let video = &probe["streams"][0];
+    assert_eq!(video["codec_name"], "av1", "Matroska must contain AV1");
+    assert_eq!(video["pix_fmt"], "yuv444p12le", "Matroska must retain the 12-bit 4:4:4 AV1 profile");
+    let decoded = std::process::Command::new(ffmpeg)
+        .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+        .arg(&path)
+        .args(["-f", "null", "-"])
+        .output()
+        .expect("decode 12-bit MKV");
+    assert!(decoded.status.success(), "12-bit MKV libdav1d decode failed: {}", String::from_utf8_lossy(&decoded.stderr));
+}
+
+#[test]
 fn av1_software_encoder_rejects_mismatched_size_and_hdr_input() {
     let s = ExportSettings { format: Format::Av1, bitrate_mode: BitrateMode::Crf, ..Default::default() };
     let mut encoder = av1_factory(Format::Av1, 128, 96, FrameRate::FPS_24, &s).unwrap().unwrap();
