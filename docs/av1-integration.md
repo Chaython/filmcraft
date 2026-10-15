@@ -56,6 +56,14 @@ cargo test -p filmcraft-platform --test av1_hardware intel_qsv_av1_real_gpu_acce
 Remove-Item Env:FILMCRAFT_TEST_INTEL_AV1
 ```
 
+NVIDIA NVENC (Main 8-bit and HDR10 PQ Main10) can be tested on an AV1-capable NVIDIA Windows GPU:
+
+```powershell
+$env:FILMCRAFT_TEST_NVENC_AV1 = "1"
+cargo test -p filmcraft-platform --test av1_hardware nvidia_nvenc_main_and_main10_real_gpu_acceptance -- --nocapture
+Remove-Item Env:FILMCRAFT_TEST_NVENC_AV1
+```
+
 These tests fail (rather than skip) when opted in but the GPU cannot encode; they require actual hardware frames, real AV1 sequence headers, MP4 packaging and successful independent libdav1d decoding of 16 complete frames. Enable the application integration separately with `FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS=1`. PQ/HLG Main10 still needs separate real GPU colorimetry/HDR validation.
 
 ## Safety gates

@@ -1,23 +1,25 @@
 //! Opt-in real-GPU AV1 acceptance tests. Hosted GitHub runners generally do not
-//! have AMD/Intel encoding GPUs, so these require explicit environment opt-in.
-//! FILMCRAFT_TEST_AMD_AV1=1 / FILMCRAFT_TEST_INTEL_AV1=1 on a Windows GPU host.
+//! have vendor video-encoding GPUs, so these require explicit environment opt-in.
+//! FILMCRAFT_TEST_NVENC_AV1=1, FILMCRAFT_TEST_AMD_AV1=1 or
+//! FILMCRAFT_TEST_INTEL_AV1=1 on a suitable Windows GPU host.
 #[cfg(target_os = "windows")]
 mod windows_gpu {
     use std::io::Cursor;
     use std::process::Command;
 
-    use filmcraft_export::{Av1PixelFormat, EncoderFrame, ExportSettings, Format, HardwareEncoding, VideoEncoder};
+    use filmcraft_export::{Av1PixelFormat, ColorSignal, EncoderFrame, ExportSettings, Format, HardwareEncoding, VideoEncoder};
     use filmcraft_isobmff::{Brand, CodecConfig, Mp4Writer, TrackConfig, WriteSample, WriterOptions};
     use filmcraft_time::FrameRate;
 
     type HardwareFactory = fn(Format, u32, u32, FrameRate, &ExportSettings) -> Option<filmcraft_export::Result<Box<dyn VideoEncoder>>>;
 
-    fn run_gpu_encoder(name: &str, factory: HardwareFactory) {
+    fn run_gpu_encoder(name: &str, factory: HardwareFactory, ten_bit: bool) {
         let w = 320u32;
         let h = 240u32;
         let settings = ExportSettings {
             format: Format::Av1,
-            av1_pixel_format: Av1PixelFormat::Yuv420p8,
+            av1_pixel_format: if ten_bit { Av1PixelFormat::Yuv420p10 } else { Av1PixelFormat::Yuv420p8 },
+            signal: if ten_bit { ColorSignal::PQ } else { ColorSignal::default() },
             hardware_encoding: HardwareEncoding::Auto,
             ..Default::default()
         };
@@ -27,9 +29,16 @@ mod windows_gpu {
             None => panic!("{name} AV1 hardware session unavailable or unsupported"),
         };
         let rgba = vec![128u8; (w * h * 4) as usize];
+        let hdr = vec![0.5f32; (w * h * 3) as usize];
         let mut packets = Vec::new();
         for i in 0..16u64 {
-            let frame = EncoderFrame { width: w, height: h, rgba: &rgba, hdr: None, index: i };
+            let frame = EncoderFrame {
+                width: w,
+                height: h,
+                rgba: if ten_bit { &[] } else { &rgba },
+                hdr: ten_bit.then_some(hdr.as_slice()),
+                index: i,
+            };
             packets.extend(encoder.encode(&frame).expect("encode 16 hardware AV1 frames"));
         }
         packets.extend(encoder.flush().expect("drain hardware encoder"));
@@ -37,8 +46,20 @@ mod windows_gpu {
         let entry = encoder.final_sample_entry().expect("validate hardware AV1 sequence header").expect("final AV1 sample entry");
         let CodecConfig::Av1(ref av1) = entry.codec else { panic!("{name} returned a non-AV1 sample entry") };
         assert!(!av1.config_obus.is_empty(), "{name} must output a genuine sequence-header OBU");
-        assert!(!av1.high_bitdepth, "8-bit hardware AV1 must not be labeled Main10");
+        assert_eq!(av1.high_bitdepth, ten_bit, "{name} output bit depth does not match requested Main/Main10");
+        assert!(!av1.twelve_bit, "{name} unexpectedly wrote 12-bit AV1");
         assert!(av1.chroma_subsampling_x && av1.chroma_subsampling_y);
+        let (_, header) = filmcraft_platform::nvenc::av1::extract_sequence_header_obu(&av1.config_obus)
+            .expect("hardware AV1 config must contain an authentic Sequence Header OBU");
+        let seq = filmcraft_av1::SequenceHeader::parse(header).expect("parse actual hardware AV1 sequence header");
+        assert_eq!(seq.color.bit_depth, if ten_bit { 10 } else { 8 });
+        if ten_bit {
+            assert_eq!(
+                (seq.color.color_primaries, seq.color.transfer_characteristics, seq.color.matrix_coefficients),
+                (9, 16, 9),
+                "{name} PQ Main10 bitstream signaling is missing or incorrect"
+            );
+        }
         let mut bytes = Cursor::new(Vec::new());
         {
             let mut writer = Mp4Writer::new(&mut bytes, WriterOptions::new(Brand::Mp4)).expect("create hardware AV1 MP4");
@@ -62,12 +83,12 @@ mod windows_gpu {
         let decoded = Command::new("ffmpeg")
             .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
             .arg(&path)
-            .args(["-pix_fmt", "yuv420p", "-f", "rawvideo", "-"])
+            .args(["-pix_fmt", if ten_bit { "yuv420p10le" } else { "yuv420p" }, "-f", "rawvideo", "-"])
             .output()
             .expect("independent ffmpeg/libdav1d must be installed for hardware acceptance");
         let _ = std::fs::remove_file(&path);
         assert!(decoded.status.success(), "{name} hardware AV1 MP4 failed independent decoding: {}", String::from_utf8_lossy(&decoded.stderr));
-        assert_eq!(decoded.stdout.len(), (w * h * 3 / 2 * 16) as usize, "{name} returned truncated or incorrectly framed AV1 video");
+        assert_eq!(decoded.stdout.len(), (w * h * 3 / 2 * 16 * if ten_bit { 2 } else { 1 }) as usize, "{name} returned truncated or incorrectly framed AV1 video");
     }
 
     #[test]
@@ -76,7 +97,7 @@ mod windows_gpu {
             eprintln!("SKIPPED: set FILMCRAFT_TEST_AMD_AV1=1 on a Windows AMD AV1 encoding GPU");
             return;
         }
-        run_gpu_encoder("amd", filmcraft_platform::amf::export::factory);
+        run_gpu_encoder("amd", filmcraft_platform::amf::export::factory, false);
     }
 
     #[test]
@@ -85,6 +106,16 @@ mod windows_gpu {
             eprintln!("SKIPPED: set FILMCRAFT_TEST_INTEL_AV1=1 on a Windows Intel AV1 encoding GPU");
             return;
         }
-        run_gpu_encoder("intel", filmcraft_platform::qsv::export::factory);
+        run_gpu_encoder("intel", filmcraft_platform::qsv::export::factory, false);
     }
+    #[test]
+    fn nvidia_nvenc_main_and_main10_real_gpu_acceptance() {
+        if std::env::var("FILMCRAFT_TEST_NVENC_AV1").as_deref() != Ok("1") {
+            eprintln!("SKIPPED: set FILMCRAFT_TEST_NVENC_AV1=1 on an AV1-capable Windows NVIDIA GPU");
+            return;
+        }
+        run_gpu_encoder("nvidia-main", filmcraft_platform::nvenc::export::factory, false);
+        run_gpu_encoder("nvidia-main10", filmcraft_platform::nvenc::export::factory, true);
+    }
+
 }
