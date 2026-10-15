@@ -204,12 +204,40 @@ pub fn pix_fmt_for(p: &Picture) -> &'static str {
 /// Decode a fixture and compare every frame with libdav1d; panics with details on mismatch.
 pub fn check_bit_exact(ff: &Path, spec: &Spec) {
     let path = make(ff, spec);
-    check_file(ff, spec.name, &path);
+    check_file_inner(ff, spec.name, &path, Some(spec.pix_fmt));
 }
 
 /// Decode an IVF file and compare every frame with libdav1d; panics with details on mismatch.
 pub fn check_file(ff: &Path, name: &str, path: &Path) {
+    check_file_inner(ff, name, path, None);
+}
+
+/// Assert the decoded AV1 profile metadata as well as its reconstructed samples.
+fn check_file_inner(ff: &Path, name: &str, path: &Path, expected_pix_fmt: Option<&str>) {
     let pics = decode_all_threads(path, 1).unwrap_or_else(|e| panic!("{name}: {e}"));
+    if let Some(fmt) = expected_pix_fmt {
+        let expected = match fmt {
+            "yuv420p" => Some((8, 1, 1, false)),
+            "yuv420p10le" => Some((10, 1, 1, false)),
+            "yuv420p12le" => Some((12, 1, 1, false)),
+            "yuv422p" => Some((8, 1, 0, false)),
+            "yuv422p10le" => Some((10, 1, 0, false)),
+            "yuv422p12le" => Some((12, 1, 0, false)),
+            "yuv444p" => Some((8, 0, 0, false)),
+            "yuv444p10le" => Some((10, 0, 0, false)),
+            "yuv444p12le" => Some((12, 0, 0, false)),
+            "gray" => Some((8, 1, 1, true)),
+            "gray10le" => Some((10, 1, 1, true)),
+            "gray12le" => Some((12, 1, 1, true)),
+            _ => None,
+        };
+        if let Some((depth, ssx, ssy, mono)) = expected {
+            assert!(!pics.is_empty(), "{name}: no decoded frames for {fmt}");
+            for (i, p) in pics.iter().enumerate() {
+                assert_eq!((p.bit_depth, p.subsampling_x, p.subsampling_y, p.mono_chrome), (depth, ssx, ssy, mono), "{name}: decoded AV1 pixel format differs from encoder input {fmt} at frame {i}");
+            }
+        }
+    }
     // Tile, post-filter and frame threading must give the same pictures.
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).max(4);
     let mt = decode_all_threads(path, threads).unwrap_or_else(|e| panic!("{name} ({threads} threads): {e}"));
