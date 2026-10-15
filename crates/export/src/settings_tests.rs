@@ -952,6 +952,23 @@ fn av1_is_an_mp4_format_with_builtin_encoder() {
 }
 
 #[test]
+fn av1_software_encoder_rejects_mismatched_size_and_hdr_input() {
+    let s = ExportSettings { format: Format::Av1, bitrate_mode: BitrateMode::Crf, ..Default::default() };
+    let mut encoder = av1_factory(Format::Av1, 128, 96, FrameRate::FPS_24, &s).unwrap().unwrap();
+    let av1c = match encoder.sample_entry().codec {
+        filmcraft_isobmff::CodecConfig::Av1(c) => c,
+        other => panic!("expected AV1 sample entry, got {other:?}"),
+    };
+    assert_eq!(av1c.seq_level_idx_0, 0, "av1C must match the encoder's declared AV1 level");
+    let wrong_size = EncoderFrame { width: 64, height: 96, rgba: &[], hdr: None, index: 0 };
+    let err = encoder.encode(&wrong_size).unwrap_err();
+    assert!(err.to_string().contains("does not match"), "{err}");
+    let hdr = EncoderFrame { width: 128, height: 96, rgba: &[], hdr: Some(&[0.0]), index: 0 };
+    let err = encoder.encode(&hdr).unwrap_err();
+    assert!(err.to_string().contains("SDR"), "{err}");
+}
+
+#[test]
 fn h265_is_a_format_that_needs_a_registered_encoder() {
     use std::sync::atomic::{AtomicBool, Ordering};
     // names, ids, files and serialized settings
