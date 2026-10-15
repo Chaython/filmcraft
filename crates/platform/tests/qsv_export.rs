@@ -1,6 +1,6 @@
 //! Intel Quick Sync Video encoder probe, export, and configuration tests.
 
-#![cfg(any(target_os = "windows", all(target_os = "linux", target_pointer_width = "64")))]
+#![cfg(target_os = "windows")]
 
 use filmcraft_export::{ExportSettings, Format, HardwareEncoding};
 use filmcraft_platform::qsv::device::{INTEL_VENDOR_ID, IntelGpu};

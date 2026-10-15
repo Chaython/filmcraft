@@ -31,7 +31,7 @@ mod av1_run;
 #[allow(unsafe_code)]
 mod gpu;
 #[allow(unsafe_code)]
-mod mft;
+pub(crate) mod mft;
 mod pending;
 mod reset;
 mod stream;

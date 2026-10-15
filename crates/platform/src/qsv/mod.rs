@@ -9,14 +9,8 @@ pub mod session;
 
 use std::sync::OnceLock;
 
-#[cfg(target_os = "windows")]
-use windows::Win32::Media::MediaFoundation::{MFVideoFormat_AV1, MFVideoFormat_HEVC};
-
+use filmcraft_time::FrameRate;
 use self::device::IntelGpu;
-#[cfg(target_os = "windows")]
-use self::session::find_encoder_activate;
-#[cfg(target_os = "windows")]
-use crate::media_foundation::mft::api;
 
 static HEVC_AVAILABLE: OnceLock<bool> = OnceLock::new();
 static HEVC_HDR_AVAILABLE: OnceLock<bool> = OnceLock::new();
@@ -55,38 +49,47 @@ pub fn av1_hdr_available() -> bool {
 
 /// Warm up HEVC probes asynchronously or on background thread.
 pub fn warm_hevc_probe() {
-    let _ = hevc_available();
-    let _ = hevc_hdr_available();
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if let Err(e) = std::thread::Builder::new().name("qsv-hevc-probe".into()).spawn(|| {
+            let _ = std::panic::catch_unwind(hevc_available);
+            let _ = std::panic::catch_unwind(hevc_hdr_available);
+        }) {
+            log::warn!("QSV HEVC probe thread was not started: {e}");
+        }
+    });
 }
 
 /// Warm up AV1 probes asynchronously.
 pub fn warm_av1_probe() {
-    let _ = av1_available();
-    let _ = av1_hdr_available();
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if let Err(e) = std::thread::Builder::new().name("qsv-av1-probe".into()).spawn(|| {
+            let _ = std::panic::catch_unwind(av1_available);
+            let _ = std::panic::catch_unwind(av1_hdr_available);
+        }) {
+            log::warn!("QSV AV1 probe thread was not started: {e}");
+        }
+    });
 }
 
 #[cfg(target_os = "windows")]
-fn probe_codec_hevc(_ten_bit: bool) -> bool {
-    probe_codec_win(MFVideoFormat_HEVC)
+fn probe_codec_hevc(ten_bit: bool) -> bool {
+    probe_codec_win(session::Codec::Hevc, if ten_bit { session::Profile::HevcMain10 } else { session::Profile::HevcMain }, ten_bit)
 }
 
 #[cfg(target_os = "windows")]
-fn probe_codec_av1(_ten_bit: bool) -> bool {
-    probe_codec_win(MFVideoFormat_AV1)
+fn probe_codec_av1(ten_bit: bool) -> bool {
+    probe_codec_win(session::Codec::Av1, if ten_bit { session::Profile::Av1Main10 } else { session::Profile::Av1Main }, ten_bit)
 }
 
 #[cfg(target_os = "windows")]
-fn probe_codec_win(subtype: windows::core::GUID) -> bool {
-    let Ok(Some(_gpu)) = IntelGpu::probe() else {
-        return false;
-    };
-    let Ok(mf_api) = api() else {
-        return false;
-    };
-    let Ok(Some(_)) = find_encoder_activate(mf_api, subtype) else {
-        return false;
-    };
-    true
+fn probe_codec_win(codec: session::Codec, profile: session::Profile, ten_bit: bool) -> bool {
+    if !has_device() { return false; }
+    session::QsvSession::new(session::Config {
+        codec, profile, size: (640, 360), rate: FrameRate::FPS_24,
+        bitrate_kbps: 2_000, keyint: 24, ten_bit,
+    }).is_ok()
 }
 
 #[cfg(not(target_os = "windows"))]
