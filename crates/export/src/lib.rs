@@ -1657,6 +1657,54 @@ pub fn rgba_to_yuv420_8(rgba: &[u8], w: usize, h: usize, y: &mut Vec<u8>, u: &mu
     });
 }
 
+/// Convert an SDR RGBA8 picture directly to BT.709 limited-range 10-bit 4:2:0.
+///
+/// The RGB channels have 8-bit precision, but mixing them into YUV creates fractional
+/// code values. Quantizing YUV directly at 10 bits preserves those values better than
+/// converting to YUV8 then multiplying each code by four. Alpha is ignored.
+pub fn rgba_to_yuv420_10(rgba: &[u8], w: usize, h: usize, y: &mut Vec<u16>, u: &mut Vec<u16>, v: &mut Vec<u16>) -> Result<()> {
+    let bad = || ExportError::Encode(format!("a {w}x{h} SDR picture needs w*h*4 RGBA8 bytes, got {}", rgba.len()));
+    let pixels = w.checked_mul(h).ok_or_else(bad)?;
+    if w == 0 || h == 0 || pixels.checked_mul(4) != Some(rgba.len()) {
+        return Err(bad());
+    }
+    let row_pair = w.checked_mul(2).ok_or_else(bad)?;
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let (kr, kb) = (0.2126f32, 0.0722f32);
+    let (kg, sb, sr) = (1.0 - kr - kb, 2.0 * (1.0 - kb), 2.0 * (1.0 - kr));
+    let code = |value: f32| value.round().clamp(4.0, 1019.0) as u16;
+    y.clear();
+    y.resize(pixels, 0);
+    u.clear();
+    u.resize(cw * ch, 0);
+    v.clear();
+    v.resize(cw * ch, 0);
+    y.par_chunks_mut(row_pair).zip(u.par_chunks_mut(cw).zip(v.par_chunks_mut(cw))).enumerate().for_each(|(cy, (yr, (ur, vr)))| {
+        let mut us = vec![0.0f32; cw];
+        let mut vs = vec![0.0f32; cw];
+        let mut count = vec![0.0f32; cw];
+        for (dy, yrow) in yr.chunks_exact_mut(w).enumerate() {
+            let row = cy * 2 + dy;
+            let src = &rgba[row * w * 4..(row + 1) * w * 4];
+            for (x, destination) in yrow.iter_mut().enumerate() {
+                let i = x * 4;
+                let (r, g, b) = (f32::from(src[i]) / 255.0, f32::from(src[i + 1]) / 255.0, f32::from(src[i + 2]) / 255.0);
+                let lum = kr * r + kg * g + kb * b;
+                *destination = code(64.0 + 876.0 * lum);
+                us[x / 2] += (b - lum) / sb;
+                vs[x / 2] += (r - lum) / sr;
+                count[x / 2] += 1.0;
+            }
+        }
+        for (cx, (uo, vo)) in ur.iter_mut().zip(vr.iter_mut()).enumerate() {
+            let n = count[cx].max(1.0);
+            *uo = code(512.0 + 896.0 * us[cx] / n);
+            *vo = code(512.0 + 896.0 * vs[cx] / n);
+        }
+    });
+    Ok(())
+}
+
 /// Limited-range 8-bit 4:2:0 from encoded R'G'B' floats with matrix (Kr, Kb).
 #[allow(clippy::too_many_arguments)]
 pub fn rgbf_to_yuv420_8(rgb: &[f32], w: usize, h: usize, kr: f32, kb: f32, y: &mut Vec<u8>, u: &mut Vec<u8>, v: &mut Vec<u8>) {

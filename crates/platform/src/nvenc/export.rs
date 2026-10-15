@@ -123,22 +123,12 @@ impl VideoEncoder for NvencEncoder {
                 })?;
                 self.enc.encode_10(&self.y16, &self.u16, &self.v16, f.index).map_err(|e| ExportError::Encode(format!("NVENC: {e}{hint}")))?
             }
-            // SDR AV1 Main10 also accepts RGBA8 sources. Expand the quantized
-            // BT.709 limited-range 8-bit planes into P010 code values (x4).
-            // This is a 10-bit container/encode, not restored source precision.
+            // SDR Main10 retains additional YUV mixing precision even with RGB8
+            // input; convert directly to 10-bit BT.709 rather than upshifting YUV8.
             (true, None) if self.enc.codec() == Codec::Av1 => {
-                if Some(f.rgba.len()) != w.checked_mul(h).and_then(|n| n.checked_mul(4)) {
-                    return Err(ExportError::Encode("NVENC SDR Main10 needs exactly width*height*4 RGBA8 bytes".into()));
-                }
                 filmcraft_export::timed(filmcraft_export::Stage::Convert, || {
-                    filmcraft_export::rgba_to_yuv420_8(f.rgba, w, h, &mut self.y, &mut self.u, &mut self.v);
-                    self.y16.clear();
-                    self.y16.extend(self.y.iter().map(|&sample| u16::from(sample) << 2));
-                    self.u16.clear();
-                    self.u16.extend(self.u.iter().map(|&sample| u16::from(sample) << 2));
-                    self.v16.clear();
-                    self.v16.extend(self.v.iter().map(|&sample| u16::from(sample) << 2));
-                });
+                    filmcraft_export::rgba_to_yuv420_10(f.rgba, w, h, &mut self.y16, &mut self.u16, &mut self.v16)
+                })?;
                 self.enc.encode_10(&self.y16, &self.u16, &self.v16, f.index).map_err(|e| ExportError::Encode(format!("NVENC: {e}{hint}")))?
             }
             (true, None) => return Err(ExportError::Unsupported("NVENC HEVC Main 10 needs the HDR picture (EncoderFrame::hdr)".into())),
