@@ -308,10 +308,10 @@ impl VideoEncoder for FfmpegAv1Encoder {
         });
         let (w, h) = (u16::try_from(self.width).unwrap_or(u16::MAX), u16::try_from(self.height).unwrap_or(u16::MAX));
         let mut entry = SampleEntry::av1(initial, w, h);
+        self.signal.apply_to(&mut entry, false);
         if let Some(video) = entry.video.as_mut() {
             video.color = Some(ColorInfo::Nclx { primaries: self.signal.primaries as u16, transfer: self.signal.transfer as u16, matrix: self.signal.matrix as u16, full_range: self.full_range });
         }
-        self.signal.apply_to(&mut entry, false);
         entry
     }
     fn final_sample_entry(&self) -> Result<Option<SampleEntry>> {

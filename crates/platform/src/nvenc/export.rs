@@ -332,8 +332,8 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
             log::info!("no hardware AV1 encoder: {why}");
             None
         }
-        Err(why) if !s.signal.is_hdr() => {
-            log::info!("NVENC AV1 session unavailable; trying the SDR software encoder: {why}");
+        Err(why) if !s.signal.is_hdr() || s.av1_pixel_format == filmcraft_export::Av1PixelFormat::Yuv420p10 => {
+            log::info!("NVENC AV1 session unavailable; trying software encoder: {why}");
             None
         }
         Err(why) => declined(&why),

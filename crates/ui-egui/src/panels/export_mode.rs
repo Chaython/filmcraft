@@ -23,7 +23,7 @@
 use egui::{Align2, Color32, Rect, Sense, pos2, vec2};
 use filmcraft_engine::export::presets::{DEFAULT_PRESET, preset_key};
 use filmcraft_engine::export::{
-    AudioCodec, BitrateMode, ExportSettings, ExrCompression, FieldOrder, Format, GpuRendering, H264Profile, HardwareEncoding, Multiplexer, MxfVideoCodec,
+    AudioCodec, Av1PixelFormat, BitrateMode, ExportSettings, ExrCompression, FieldOrder, Format, GpuRendering, H264Profile, HardwareEncoding, Multiplexer, MxfVideoCodec,
     Placement, SampleFormat, Scaling, TextOverlay, builtin_presets, format_bytes,
 };
 use filmcraft_engine::time::{FrameRate, Tick};
@@ -709,7 +709,23 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     (false, _) => tl!("Main (8-bit)"),
                 };
                 row(ui, t, tl!("Profile"), |ui| ui.label(label));
-                row(ui, t, tl!("Encoder"), |ui| ui.label(tl!("Hardware (Auto) / Software 8-bit SDR")));
+                row(ui, t, tl!("Pixel Format"), |ui| {
+                    let formats = Av1PixelFormat::ALL;
+                    let labels: Vec<(String, bool)> = formats.iter().map(|p| (p.label().to_owned(), true)).collect();
+                    if let Some(i) = combo(ui, reg, "export.video.av1PixelFormat", s.av1_pixel_format.label(), &labels, 180.0) {
+                        s.av1_pixel_format = formats[i];
+                    }
+                });
+                row(ui, t, tl!("Full Range"), |ui| {
+                    check(ui, reg, "export.video.av1FullRange", &mut s.av1_full_range, "Full (0–max) instead of studio/video levels");
+                });
+                row(ui, t, tl!("Encoder"), |ui| {
+                    if s.av1_pixel_format != Av1PixelFormat::Yuv420p8 || s.av1_full_range {
+                        ui.label("FFmpeg / libaom-av1 (high precision software)");
+                    } else {
+                        ui.label(tl!("Hardware (Auto) / Software 8-bit SDR"));
+                    }
+                });
             } else {
                 row(ui, t, tl!("Profile"), |ui| {
                     let o = [H264Profile::Baseline, H264Profile::Main, H264Profile::High];
