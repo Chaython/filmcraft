@@ -491,6 +491,60 @@ mod tests {
             let packets = enc.flush().expect("libaom AV1 encode");
             assert_eq!(packets.len(), 2, "one encoded sample per input frame");
             let entry = enc.final_sample_entry().expect("validated av1C").expect("video entry");
+            // Test the actual muxed MP4, not just the intermediate IVF packet and av1C.
+            let mut cursor = std::io::Cursor::new(Vec::new());
+            {
+                let mut writer = filmcraft_isobmff::Mp4Writer::new(
+                    &mut cursor,
+                    filmcraft_isobmff::WriterOptions::new(filmcraft_isobmff::Brand::Mp4),
+                )
+                .expect("MP4 writer");
+                let track = writer.add_track(filmcraft_isobmff::TrackConfig::new(entry.clone(), 24)).expect("AV1 MP4 track");
+                for packet in &packets {
+                    writer
+                        .write_sample(
+                            track,
+                            filmcraft_isobmff::WriteSample {
+                                data: &packet.data,
+                                duration: packet.duration,
+                                composition_offset: packet.composition_offset,
+                                is_sync: packet.key,
+                            },
+                        )
+                        .expect("AV1 MP4 write");
+                }
+                writer.finish().expect("finalize MP4");
+            }
+            let mp4 = cursor.into_inner();
+            let parsed = filmcraft_isobmff::open(&mp4).expect("read exported AV1 MP4");
+            assert_eq!(parsed.tracks.len(), 1);
+            assert_eq!(parsed.tracks[0].samples.len(), 2);
+            // Independent decoder: verify libdav1d accepts the container and produces
+            // exactly the intended number of pixels at the intended sample depth.
+            let path = enc.ivf_path.with_extension("mp4");
+            std::fs::write(&path, &mp4).expect("temporary AV1 MP4");
+            let decoded = Command::new(&enc.ffmpeg)
+                .args(["-hide_banner", "-loglevel", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+                .arg(&path)
+                .args(["-pix_fmt", fmt.ffmpeg_name(), "-f", "rawvideo", "-"])
+                .output()
+                .expect("independent libdav1d");
+            let _ = std::fs::remove_file(&path);
+            assert!(
+                decoded.status.success(),
+                "{} independent libdav1d decode failed: {}",
+                fmt.label(),
+                String::from_utf8_lossy(&decoded.stderr)
+            );
+            let (sx, sy) = fmt.chroma_shift();
+            let samples = 64 * 64 + 2 * (64usize.div_ceil(1 << sx)) * (64usize.div_ceil(1 << sy));
+            let bytes_per_sample = if fmt.bit_depth() > 8 { 2 } else { 1 };
+            assert_eq!(
+                decoded.stdout.len(),
+                samples * bytes_per_sample * 2,
+                "{}: wrong independent decoded frame count/plane sizes",
+                fmt.label()
+            );
             match entry.codec {
                 filmcraft_isobmff::CodecConfig::Av1(config) => {
                     assert_eq!((config.high_bitdepth, config.twelve_bit), (fmt.bit_depth() > 8, fmt.bit_depth() == 12));
