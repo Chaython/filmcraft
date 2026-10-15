@@ -1605,6 +1605,9 @@ mod tests {
     fn test_hostile_rate_control_extremes_do_not_panic() {
         let mut cfg = EncoderConfig::new(64, 64, 1, u32::MAX);
         cfg.rate_control = Some(RateControl::Cbr { kbps: u32::MAX });
+        // A bitrate above every AV1 Main-tier level is invalid, not a reason to panic.
+        assert!(matches!(Encoder::new(cfg.clone()), Err(Error::Invalid(_))));
+        cfg.rate_control = Some(RateControl::Cbr { kbps: 1_500 });
         let mut enc = Encoder::new(cfg).unwrap();
 
         let y = vec![128u8; 64 * 64];
@@ -1619,6 +1622,8 @@ mod tests {
 
         let mut vbr_cfg = EncoderConfig::new(64, 64, 1, u32::MAX);
         vbr_cfg.rate_control = Some(RateControl::Vbr { target_kbps: u32::MAX, max_kbps: u32::MAX });
+        assert!(matches!(Encoder::new(vbr_cfg.clone()), Err(Error::Invalid(_))));
+        vbr_cfg.rate_control = Some(RateControl::Vbr { target_kbps: 1_000, max_kbps: 1_500 });
         let mut vbr_enc = Encoder::new(vbr_cfg).unwrap();
         let res_vbr = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ = vbr_enc.encode(&frame, 0);
