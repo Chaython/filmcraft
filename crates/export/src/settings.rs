@@ -700,14 +700,15 @@ impl ExportSettings {
                 }
                 Format::Av1 => {
                     let software = crate::job::av1_software_sdr(self);
-                    let profile = if software {
-                        "AV1 Main (8-bit BT.709 SDR, software)"
-                    } else if crate::hdr_available(Format::Av1) {
-                        "AV1 Main / Main 10 for HDR (hardware Auto, 8-bit SDR software fallback)"
+                    let external = self.av1_pixel_format != crate::Av1PixelFormat::Yuv420p8 || self.av1_full_range;
+                    let encoder = if external {
+                        "libaom-av1 software (FFmpeg)"
+                    } else if software {
+                        "native software"
                     } else {
-                        "AV1 Main (hardware Auto, 8-bit SDR software fallback)"
+                        "hardware Auto (native software fallback)"
                     };
-                    v += &format!(", {profile}, {}", self.bitrate_mode.label());
+                    v += &format!(", AV1 {}, {}, {} range, {}", self.av1_pixel_format.label(), encoder, if self.av1_full_range { "full" } else { "limited" }, self.bitrate_mode.label());
                     v += &match self.bitrate_mode {
                         BitrateMode::Cbr => format!(", {}", mbps(r.target_kbps)),
                         BitrateMode::Crf => format!(" {}", self.crf),

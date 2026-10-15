@@ -703,12 +703,12 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                 row(ui, t, tl!("Profile"), |ui| ui.label(label));
                 row(ui, t, tl!("Encoder"), |ui| ui.label(tl!("Hardware (H.265 has no software encoder)")));
             } else if av1 {
-                let label = match (filmcraft_engine::export::hdr_available(Format::Av1), seq_hdr && !s.sdr) {
-                    (true, true) => tl!("Main 10 (10-bit, HDR)"),
-                    (true, false) => tl!("Main (8-bit; Main 10 for HDR sequences)"),
-                    (false, _) => tl!("Main (8-bit)"),
+                let profile = match (s.av1_pixel_format.bit_depth(), s.av1_pixel_format.chroma_shift()) {
+                    (12, _) | (_, (1, 0)) => "AV1 Professional",
+                    (_, (0, 0)) => "AV1 High",
+                    _ => "AV1 Main",
                 };
-                row(ui, t, tl!("Profile"), |ui| ui.label(label));
+                row(ui, t, tl!("Profile"), |ui| ui.label(profile));
                 row(ui, t, tl!("Pixel Format"), |ui| {
                     let formats = Av1PixelFormat::ALL;
                     let labels: Vec<(String, bool)> = formats.iter().map(|p| (p.label().to_owned(), true)).collect();
@@ -807,7 +807,7 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             // GPUs on Windows, VA-API on Linux); everything it does not take (two-pass, HDR, MXF) and
             // every machine without one keeps the built-in encoder.
             // AV1 has an 8-bit SDR software fallback; HEVC remains hardware-only.
-            if !hevc {
+            if !hevc && (!av1 || (s.av1_pixel_format == Av1PixelFormat::Yuv420p8 && !s.av1_full_range) || (s.av1_pixel_format == Av1PixelFormat::Yuv420p10 && seq_hdr && !s.sdr)) {
                 row(ui, t, "Hardware Encoding", |ui| {
                     let mut on = s.hardware_encoding == HardwareEncoding::Auto;
                     if check(ui, reg, "export.video.hardwareEncoding", &mut on, "Use the hardware encoder when available") {
