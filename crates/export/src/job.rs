@@ -501,6 +501,11 @@ impl Exporter {
                 mux.set_sample_entry(at, entry).map_err(|e| ExportError::Io(e.to_string()))?;
             }
         }
+        if let (Some(vt), Some(entry)) = (self.vt, self.venc.final_sample_entry()?) {
+            if let Some(mux) = self.mux.as_mut() {
+                mux.set_sample_entry(vt, entry).map_err(|e| ExportError::Io(e.to_string()))?;
+            }
+        }
         let (bytes, extra_files) = match self.mxf.take() {
             Some(m) => m.finish(&self.settings)?,
             None => {

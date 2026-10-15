@@ -733,6 +733,11 @@ pub struct EncoderFrame<'a> {
 pub trait VideoEncoder: Send {
     /// MP4/MOV sample entry (codec config) — may only be complete after the first frame.
     fn sample_entry(&self) -> SampleEntry;
+    /// Hardware encoders may discover their validated codec header only after encoding.
+    /// The MP4 writer replaces the initial entry before finalizing the file.
+    fn final_sample_entry(&self) -> Result<Option<SampleEntry>> {
+        Ok(None)
+    }
     fn timescale(&self) -> u32;
     fn encode(&mut self, frame: &EncoderFrame) -> Result<Vec<EncodedPacket>>;
     fn flush(&mut self) -> Result<Vec<EncodedPacket>>;
@@ -1764,6 +1769,16 @@ impl VideoEncoder for Av1Encoder {
         self.rate.num.max(1) as u32
     }
     fn encode(&mut self, f: &EncoderFrame) -> Result<Vec<EncodedPacket>> {
+        if f.width != self.w || f.height != self.h {
+            return Err(ExportError::Unsupported(format!("software AV1 frame {}x{} does not match encoder {}x{}", f.width, f.height, self.w, self.h)));
+        }
+        if f.hdr.is_some() {
+            return Err(ExportError::Unsupported("software AV1 requires SDR input; tone-map HDR before encoding".into()));
+        }
+        let expected_len = usize::try_from(self.w).ok().and_then(|w| usize::try_from(self.h).ok().and_then(|h| w.checked_mul(h))).and_then(|pixels| pixels.checked_mul(4));
+        if expected_len.is_none_or(|needed| f.rgba.len() < needed) {
+            return Err(ExportError::Unsupported("software AV1 RGBA input is shorter than the requested frame size".into()));
+        }
         timed(Stage::Convert, || match f.hdr {
             Some(rgb) => {
                 let (kr, kb) = self.signal.kr_kb();
