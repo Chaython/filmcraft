@@ -196,7 +196,9 @@ pub fn stepped(format: Format) -> bool {
 /// writes HDR (`hdr_available` says so for H.265 and AV1, which have no built-in encoder).
 /// AV1 CRF and Hardware Encoding Off select the 8-bit BT.709 software path.
 pub(crate) fn av1_software_sdr(s: &ExportSettings) -> bool {
-    s.video_format() == Format::Av1 && (s.hardware_encoding == crate::HardwareEncoding::Off || s.bitrate_mode == crate::BitrateMode::Crf)
+    s.video_format() == Format::Av1
+        && s.av1_pixel_format == crate::Av1PixelFormat::Yuv420p8
+        && (s.hardware_encoding == crate::HardwareEncoding::Off || s.bitrate_mode == crate::BitrateMode::Crf)
 }
 
 pub(crate) fn hdr_output(working_hdr: bool, sdr: bool, format: Format, hdr_available: impl Fn(Format) -> bool) -> bool {
@@ -233,7 +235,9 @@ impl Exporter {
         // HDR sequences export HDR (H.264 / ProRes / DNxHR / APV, and H.265 where a registered encoder
         // writes Main 10) unless SDR is asked for; elsewhere H.265 is tone-mapped 8-bit SDR
         let pipe = q.settings.color;
-        let hdr_out = hdr_output(pipe.working.is_hdr(), settings.sdr || av1_software_sdr(settings), settings.video_format(), crate::hdr_available);
+        let hdr_out = hdr_output(pipe.working.is_hdr(), settings.sdr || av1_software_sdr(settings), settings.video_format(), |format| {
+            crate::hdr_available(format) || (format == Format::Av1 && settings.av1_pixel_format.bit_depth() >= 10)
+        });
         let mut settings = settings.clone();
         settings.signal = match (hdr_out, pipe.working) {
             (true, filmcraft_color::WorkingSpace::Rec2100Pq) => ColorSignal::PQ,

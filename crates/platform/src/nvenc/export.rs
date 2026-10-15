@@ -301,7 +301,12 @@ fn hevc_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<R
 /// The AV1 side of [`factory`]: FilmCraft's hardware AV1 encoder on Windows, so the Hardware encoding toggle
 /// does not apply and a request NVENC cannot take is an error, not a fall-through.
 fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Result<Box<dyn VideoEncoder>>> {
-    if s.hardware_encoding == HardwareEncoding::Off {
+    if s.hardware_encoding == HardwareEncoding::Off
+        || s.bitrate_mode == BitrateMode::Crf
+        || s.av1_full_range
+        || !matches!(s.av1_pixel_format, filmcraft_export::Av1PixelFormat::Yuv420p8 | filmcraft_export::Av1PixelFormat::Yuv420p10)
+        || (s.av1_pixel_format == filmcraft_export::Av1PixelFormat::Yuv420p10 && !s.signal.is_hdr())
+    {
         return None;
     }
     let declined = |why: &str| {

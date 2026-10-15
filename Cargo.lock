@@ -1948,6 +1948,7 @@ dependencies = [
 name = "filmcraft-export"
 version = "0.8.0"
 dependencies = [
+ "filmcraft-av1",
  "filmcraft-aac",
  "filmcraft-apv",
  "filmcraft-audio-dsp",

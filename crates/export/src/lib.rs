@@ -18,6 +18,7 @@ use std::io::Write;
 mod aac_out;
 mod audio_out;
 mod deflate;
+mod ffmpeg_av1;
 mod job;
 mod mxf_out;
 mod pace;
@@ -59,6 +60,68 @@ pub enum ExportError {
 }
 
 pub type Result<T> = std::result::Result<T, ExportError>;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Av1PixelFormat {
+    #[default]
+    Yuv420p8,
+    Yuv420p10,
+    Yuv420p12,
+    Yuv422p8,
+    Yuv422p10,
+    Yuv422p12,
+    Yuv444p8,
+    Yuv444p10,
+    Yuv444p12,
+}
+impl Av1PixelFormat {
+    pub const ALL: [Self; 9] = [
+        Self::Yuv420p8, Self::Yuv420p10, Self::Yuv420p12,
+        Self::Yuv422p8, Self::Yuv422p10, Self::Yuv422p12,
+        Self::Yuv444p8, Self::Yuv444p10, Self::Yuv444p12,
+    ];
+    pub const fn bit_depth(self) -> u8 {
+        match self {
+            Self::Yuv420p8 | Self::Yuv422p8 | Self::Yuv444p8 => 8,
+            Self::Yuv420p10 | Self::Yuv422p10 | Self::Yuv444p10 => 10,
+            _ => 12,
+        }
+    }
+    pub const fn chroma_shift(self) -> (usize, usize) {
+        match self {
+            Self::Yuv420p8 | Self::Yuv420p10 | Self::Yuv420p12 => (1, 1),
+            Self::Yuv422p8 | Self::Yuv422p10 | Self::Yuv422p12 => (1, 0),
+            _ => (0, 0),
+        }
+    }
+    pub const fn ffmpeg_name(self) -> &'static str {
+        match self {
+            Self::Yuv420p8 => "yuv420p",
+            Self::Yuv420p10 => "yuv420p10le",
+            Self::Yuv420p12 => "yuv420p12le",
+            Self::Yuv422p8 => "yuv422p",
+            Self::Yuv422p10 => "yuv422p10le",
+            Self::Yuv422p12 => "yuv422p12le",
+            Self::Yuv444p8 => "yuv444p",
+            Self::Yuv444p10 => "yuv444p10le",
+            Self::Yuv444p12 => "yuv444p12le",
+        }
+    }
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Yuv420p8 => "8-bit 4:2:0",
+            Self::Yuv420p10 => "10-bit 4:2:0",
+            Self::Yuv420p12 => "12-bit 4:2:0",
+            Self::Yuv422p8 => "8-bit 4:2:2",
+            Self::Yuv422p10 => "10-bit 4:2:2",
+            Self::Yuv422p12 => "12-bit 4:2:2",
+            Self::Yuv444p8 => "8-bit 4:4:4",
+            Self::Yuv444p10 => "10-bit 4:4:4",
+            Self::Yuv444p12 => "12-bit 4:4:4",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Format {
@@ -309,6 +372,12 @@ pub enum H264Pass {
 #[serde(default, rename_all = "camelCase")]
 pub struct ExportSettings {
     pub format: Format,
+    /// AV1 bit depth and chroma subsampling. Unhandled formats use FFmpeg/libaom.
+    #[serde(default)]
+    pub av1_pixel_format: Av1PixelFormat,
+    /// Use full range instead of studio/limited levels for AV1 exports.
+    #[serde(default)]
+    pub av1_full_range: bool,
     pub path: String,
     /// Timeline range (default: In/Out if set, else the whole sequence).
     pub range: Option<TimeRange>,
@@ -551,6 +620,8 @@ impl Default for ExportSettings {
     fn default() -> Self {
         Self {
             format: Format::H264,
+            av1_pixel_format: Av1PixelFormat::default(),
+            av1_full_range: false,
             path: String::new(),
             range: None,
             scale: 1.0,
@@ -1802,6 +1873,9 @@ impl VideoEncoder for Av1Encoder {
 fn av1_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Result<Box<dyn VideoEncoder>>> {
     if format != Format::Av1 {
         return None;
+    }
+    if s.av1_pixel_format != Av1PixelFormat::Yuv420p8 || s.av1_full_range {
+        return ffmpeg_av1::factory(format, w, h, rate, s);
     }
     // The current software encoder accepts only BT.709 SDR 8-bit 4:2:0.
     // Never silently export 8-bit pixels carrying PQ/HLG tags as HDR.
