@@ -75,6 +75,40 @@ impl EncoderConfig {
     }
 }
 
+/// Select the smallest AV1 Main tier level satisfying Annex A picture dimensions, display
+/// sample rate and configured peak bitrate. Return None rather than mislabel a stream.
+fn choose_level(cfg: &EncoderConfig) -> Option<u8> {
+    // (seq_level_idx, MaxPicSize, MaxHSize, MaxVSize, MaxDisplayRate, MaxBitrate kbit/s)
+    const LEVELS: [(u8, u64, u32, u32, u64, u32); 13] = [
+        (0, 147_456, 2048, 1152, 4_423_680, 1_500),
+        (1, 278_784, 2816, 1584, 8_363_520, 3_000),
+        (4, 665_856, 4352, 2448, 19_975_680, 6_000),
+        (5, 1_065_024, 5504, 3096, 31_950_720, 10_000),
+        (8, 2_359_296, 6144, 3456, 70_778_880, 12_000),
+        (9, 2_359_296, 6144, 3456, 141_557_760, 20_000),
+        (12, 8_912_896, 8192, 4352, 267_386_880, 30_000),
+        (13, 8_912_896, 8192, 4352, 534_773_760, 40_000),
+        (14, 8_912_896, 8192, 4352, 1_069_547_520, 60_000),
+        (15, 8_912_896, 8192, 4352, 1_069_547_520, 60_000),
+        (16, 35_651_584, 16_384, 8704, 1_069_547_520, 60_000),
+        (17, 35_651_584, 16_384, 8704, 2_139_095_040, 100_000),
+        (18, 35_651_584, 16_384, 8704, 4_278_190_080, 160_000),
+    ];
+    let pixels = u64::from(cfg.width).checked_mul(u64::from(cfg.height))?;
+    let rate = u128::from(pixels)
+        .checked_mul(u128::from(cfg.fps_num))?
+        .checked_add(u128::from(cfg.fps_den.checked_sub(1)?))?
+        .checked_div(u128::from(cfg.fps_den))?;
+    let peak_kbps = match cfg.rate_control {
+        Some(RateControl::Cbr { kbps }) => kbps,
+        Some(RateControl::Vbr { max_kbps, .. }) => max_kbps,
+        _ => 0,
+    };
+    LEVELS.iter().find(|&&(_, max_pixels, max_width, max_height, max_rate, max_kbps)| {
+        pixels <= max_pixels && cfg.width <= max_width && cfg.height <= max_height && rate <= u128::from(max_rate) && peak_kbps <= max_kbps
+    }).map(|entry| entry.0)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Packet {
     pub data: Vec<u8>,
@@ -93,6 +127,7 @@ pub struct YuvFrame<'a> {
 #[derive(Debug)]
 pub struct Encoder {
     config: EncoderConfig,
+    seq_level_idx: u8,
     frame_count: u64,
     active_qindex: u8,
     bit_reservoir: i64,
@@ -171,6 +206,7 @@ impl Encoder {
                 _ => {}
             }
         }
+        let seq_level_idx = choose_level(&config).ok_or(Error::Invalid("dimensions, frame rate or peak bitrate exceed AV1 Main tier levels"))?;
         let initial_qindex = match config.rate_control {
             Some(RateControl::ConstantQuality(crf)) => (crf * 4.0).round().clamp(0.0, 255.0) as u8,
             Some(RateControl::Qindex(q)) => q,
@@ -181,6 +217,7 @@ impl Encoder {
         let uv_len = ((config.width as usize) / 2).saturating_mul((config.height as usize) / 2);
         Ok(Self {
             config,
+            seq_level_idx,
             frame_count: 0,
             active_qindex: initial_qindex,
             bit_reservoir: 0,
@@ -199,6 +236,10 @@ impl Encoder {
         &self.config
     }
 
+    pub fn sequence_level_idx(&self) -> u8 {
+        self.seq_level_idx
+    }
+
     pub fn sequence_header_obu(&self) -> Vec<u8> {
         let seq_cfg = obu::SequenceConfig {
             width: self.config.width,
@@ -206,6 +247,7 @@ impl Encoder {
             bit_depth: 8,
             mono_chrome: false,
             enable_cdef: self.config.enable_cdef,
+            seq_level_idx: self.seq_level_idx,
         };
         obu::write_sequence_header(&seq_cfg)
     }
@@ -275,6 +317,7 @@ impl Encoder {
             bit_depth: 8,
             mono_chrome: false,
             enable_cdef: self.config.enable_cdef,
+            seq_level_idx: self.seq_level_idx,
         };
 
         // Determine base quantization index for this frame
@@ -1598,5 +1641,24 @@ mod tests {
 
         assert_eq!(compute_mse(&[], &[]), None);
         assert_eq!(compute_mse(&[1], &[1, 2]), None);
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    use super::*;
+
+    #[test]
+    fn sequence_level_covers_picture_size_rate_and_peak_bitrate() {
+        assert_eq!(choose_level(&EncoderConfig::new(128, 96, 24, 1)), Some(0));
+        assert_eq!(choose_level(&EncoderConfig::new(1920, 1080, 60, 1)), Some(9));
+        assert_eq!(choose_level(&EncoderConfig::new(3840, 2160, 60, 1)), Some(13));
+        assert_eq!(choose_level(&EncoderConfig::new(8192, 4320, 60, 1)), Some(17));
+        assert_eq!(choose_level(&EncoderConfig::new(8192, 4320, 240, 1)), None);
+        let mut vbr = EncoderConfig::new(1920, 1080, 24, 1);
+        vbr.rate_control = Some(RateControl::Vbr { target_kbps: 15_000, max_kbps: 18_000 });
+        assert_eq!(choose_level(&vbr), Some(9));
+        let small = Encoder::new(EncoderConfig::new(128, 96, 24, 1)).unwrap();
+        assert_eq!(small.sequence_level_idx(), 0);
     }
 }

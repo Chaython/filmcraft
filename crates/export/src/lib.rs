@@ -1519,6 +1519,12 @@ impl VideoEncoder for H264Encoder {
         self.rate.num as u32
     }
     fn encode(&mut self, f: &EncoderFrame) -> Result<Vec<EncodedPacket>> {
+        if f.width != self.w || f.height != self.h {
+            return Err(ExportError::Unsupported(format!("software AV1 frame {}x{} does not match encoder {}x{}", f.width, f.height, self.w, self.h)));
+        }
+        if f.hdr.is_some() {
+            return Err(ExportError::Unsupported("software AV1 accepts only SDR frames; tone-map the source before encoding".into()));
+        }
         timed(Stage::Convert, || match f.hdr {
             Some(rgb) => {
                 let (kr, kb) = self.signal.kr_kb();
@@ -1739,7 +1745,7 @@ impl VideoEncoder for Av1Encoder {
     fn sample_entry(&self) -> SampleEntry {
         let av1c = filmcraft_isobmff::Av1Config {
             seq_profile: 0,
-            seq_level_idx_0: 8,
+            seq_level_idx_0: self.enc.sequence_level_idx(),
             seq_tier_0: false,
             high_bitdepth: false,
             twelve_bit: false,
@@ -1767,7 +1773,8 @@ impl VideoEncoder for Av1Encoder {
         });
         let cw = (f.width as usize).div_ceil(2);
         let frame = filmcraft_av1enc::YuvFrame { y: &self.y, u: &self.u, v: &self.v, y_stride: f.width as usize, uv_stride: cw };
-        let p = self.enc.encode(&frame, f.index as i64 * self.rate.den.max(1)).map_err(|e| ExportError::Encode(e.to_string()))?;
+        let pts = i64::try_from(f.index).unwrap_or(i64::MAX).saturating_mul(self.rate.den.max(1));
+        let p = self.enc.encode(&frame, pts).map_err(|e| ExportError::Encode(e.to_string()))?;
         Ok(self.packets(vec![p]))
     }
     fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
@@ -1787,7 +1794,13 @@ fn av1_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettin
             "software AV1 supports 8-bit BT.709 SDR only; select a compatible HDR hardware encoder or export SDR".into(),
         )));
     }
-    let mut cfg = filmcraft_av1enc::EncoderConfig::new(w, h, rate.num.max(1) as u32, rate.den.max(1) as u32);
+    let (Ok(num), Ok(den)) = (u32::try_from(rate.num), u32::try_from(rate.den)) else {
+        return Some(Err(ExportError::Unsupported("software AV1 frame rate exceeds the supported range".into())));
+    };
+    if num == 0 || den == 0 {
+        return Some(Err(ExportError::Unsupported("software AV1 requires a positive frame rate".into())));
+    }
+    let mut cfg = filmcraft_av1enc::EncoderConfig::new(w, h, num, den);
     let keyint = s.keyframe_distance.filter(|k| *k > 0).unwrap_or_else(|| ((rate.num as f64 / rate.den.max(1) as f64) * 2.0).round().max(1.0) as u32);
     cfg.key_int = keyint.max(1);
     let kbps = s.bitrate_kbps.max(100);

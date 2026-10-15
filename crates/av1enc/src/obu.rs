@@ -49,6 +49,8 @@ pub struct SequenceConfig {
     pub bit_depth: u8,
     pub mono_chrome: bool,
     pub enable_cdef: bool,
+    /// AV1 Annex A level selected for picture size, display rate and peak bitrate.
+    pub seq_level_idx: u8,
 }
 
 /// Write a Sequence Header OBU (spec 5.5).
@@ -68,8 +70,8 @@ pub fn write_sequence_header(cfg: &SequenceConfig) -> Vec<u8> {
     w.write_bits(0, 5);
     // operating_point_idc[0] = 0
     w.write_bits(0, 12);
-    // seq_level_idx[0] = 8 (Level 4.0 - up to 1080p, or 12 for 4K)
-    let level = if cfg.width > 1920 || cfg.height > 1080 { 12 } else { 8 };
+    // The same checked level is written in both this sequence header and MP4's av1C.
+    let level = cfg.seq_level_idx;
     w.write_bits(level, 5);
     if level > 7 {
         w.write_bit(false); // seq_tier = 0
