@@ -19,6 +19,7 @@ mod aac_out;
 mod audio_out;
 mod deflate;
 mod ffmpeg_av1;
+mod mkv_out;
 mod job;
 mod mxf_out;
 mod pace;
@@ -672,6 +673,9 @@ fn default_crf() -> f32 {
 impl ExportSettings {
     /// Reject settings the encoders cannot honour.
     pub fn validate(&self) -> Result<()> {
+        if self.multiplexer == settings::Multiplexer::Mkv && self.format != Format::Av1 {
+            return Err(ExportError::Unsupported("Matroska output is currently available for AV1 only".into()));
+        }
         if let Some(range) = self.range {
             validate_range(range)?;
         }

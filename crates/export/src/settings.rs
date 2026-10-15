@@ -126,6 +126,8 @@ pub enum Multiplexer {
     Mp4,
     /// QuickTime.
     Mov,
+    /// Matroska (AV1 video, optionally with AAC/FLAC/PCM audio).
+    Mkv,
 }
 
 /// Video codec of an MXF export.
@@ -591,7 +593,11 @@ impl ExportSettings {
 
     /// File extension of the output.
     pub fn extension(&self) -> &'static str {
-        if self.format.is_h26x() && self.multiplexer == Multiplexer::Mov { "mov" } else { self.format.extension() }
+        match (self.format, self.multiplexer) {
+            (Format::Av1, Multiplexer::Mkv) => "mkv",
+            (f, Multiplexer::Mov) if f.is_h26x() => "mov",
+            _ => self.format.extension(),
+        }
     }
 
     /// Estimated output size in bytes for `duration` of a sequence (`seq_w`×`seq_h` at `seq_rate`).
@@ -768,6 +774,7 @@ impl ExportSettings {
             "No audio".to_string()
         };
         let container = match self.format {
+            Format::Av1 if self.multiplexer == Multiplexer::Mkv => "Matroska",
             Format::H264 | Format::Hevc | Format::Av1 if self.multiplexer == Multiplexer::Mov => "QuickTime",
             Format::H264 | Format::Hevc | Format::Av1 => "MP4",
             Format::ProRes | Format::DnxHr | Format::Apv | Format::Mjpeg => "QuickTime",

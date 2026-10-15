@@ -554,9 +554,14 @@ fn settings_column(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         }
         if s.format.is_h26x() && section(ui, &mut reg, &mut ex.open_sections, "multiplexer", tl!("Multiplexer"), &t) {
             row(ui, &t, tl!("Multiplexer"), |ui| {
-                let cur = if s.multiplexer == Multiplexer::Mp4 { "MP4" } else { "QuickTime" };
-                if let Some(i) = combo(ui, &mut reg, "export.multiplexer", cur, &opts(&["MP4", "QuickTime"]), 160.0) {
-                    s.multiplexer = if i == 0 { Multiplexer::Mp4 } else { Multiplexer::Mov };
+                let cur = match s.multiplexer {
+                    Multiplexer::Mp4 => "MP4",
+                    Multiplexer::Mov => "QuickTime",
+                    Multiplexer::Mkv => "Matroska (MKV)",
+                };
+                let names: &[&str] = if s.format == Format::Av1 { &["MP4", "QuickTime", "Matroska (MKV)"] } else { &["MP4", "QuickTime"] };
+                if let Some(i) = combo(ui, &mut reg, "export.multiplexer", cur, &opts(names), 170.0) {
+                    s.multiplexer = match i { 0 => Multiplexer::Mp4, 1 => Multiplexer::Mov, _ => Multiplexer::Mkv };
                 }
             });
         }

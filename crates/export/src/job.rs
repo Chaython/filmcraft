@@ -71,6 +71,7 @@ use rayon::prelude::*;
 
 use crate::audio_out::AudioOut;
 use crate::mxf_out::{MxfMux, MxfSetup};
+use crate::mkv_out::{self, PendingMkv};
 use crate::pipeline::Pipeline;
 use crate::settings::{AudioCodec, BitrateMode};
 use crate::{
@@ -177,6 +178,8 @@ pub struct Exporter {
     mux: Option<Mp4Writer<Out>>,
     /// MXF exports write through this instead of `mux`.
     mxf: Option<MxfMux>,
+    /// Disk-backed, lossless AV1/AAC/FLAC/PCM remux from completed MP4 into MKV.
+    mkv: Option<PendingMkv>,
     seq: ItemId,
     project: Arc<Project>,
     vt: usize,
@@ -297,6 +300,7 @@ impl Exporter {
             queued: Vec::new(),
             mux: None,
             mxf: None,
+            mkv: None,
             seq,
             project: project.clone(),
             vt: 0,
@@ -420,7 +424,13 @@ impl Exporter {
             })?);
             return Ok(());
         }
-        let file = Out::create(&self.settings)?;
+        let file = if self.settings.format == Format::Av1 && self.settings.multiplexer == crate::settings::Multiplexer::Mkv {
+            let (mkv, out) = mkv_out::begin(&self.settings)?;
+            self.mkv = Some(mkv);
+            out
+        } else {
+            Out::create(&self.settings)?
+        };
         let mut opts = WriterOptions::new(self.brand);
         opts.metadata = self.settings.metadata.udta();
         let mut mux = Mp4Writer::new(file, opts).map_err(|e| ExportError::Io(e.to_string()))?;
@@ -524,7 +534,12 @@ impl Exporter {
                     .ok_or_else(|| ExportError::Encode("internal: the container writer was not created".into()))?
                     .finish()
                     .map_err(|e| ExportError::Io(e.to_string()))?;
-                (w.finish(&self.settings)?, Vec::new())
+                let bytes = if let Some(mkv) = self.mkv.as_ref() {
+                    mkv_out::finish(w, &self.settings, mkv)?
+                } else {
+                    w.finish(&self.settings)?
+                };
+                (bytes, Vec::new())
             }
         };
         note_stage(Stage::Finish, finishing.elapsed());
