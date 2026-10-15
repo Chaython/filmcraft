@@ -29,18 +29,18 @@ use windows::core::{GUID, HRESULT, Interface, PCSTR, w};
 use super::gpu::{Gpu, SurfaceFormat, ensure_com};
 
 type StartupFn = unsafe extern "system" fn(u32, u32) -> HRESULT;
-type CreateFn = unsafe extern "system" fn(*mut *mut c_void) -> HRESULT;
-type CreateBufferFn = unsafe extern "system" fn(u32, *mut *mut c_void) -> HRESULT;
+pub(crate) type CreateFn = unsafe extern "system" fn(*mut *mut c_void) -> HRESULT;
+pub(crate) type CreateBufferFn = unsafe extern "system" fn(u32, *mut *mut c_void) -> HRESULT;
 type CreateManagerFn = unsafe extern "system" fn(*mut u32, *mut *mut c_void) -> HRESULT;
-type EnumFn = unsafe extern "system" fn(GUID, u32, *const MFT_REGISTER_TYPE_INFO, *const MFT_REGISTER_TYPE_INFO, *mut *mut *mut c_void, *mut u32) -> HRESULT;
+pub(crate) type EnumFn = unsafe extern "system" fn(GUID, u32, *const MFT_REGISTER_TYPE_INFO, *const MFT_REGISTER_TYPE_INFO, *mut *mut *mut c_void, *mut u32) -> HRESULT;
 
 /// The few `mfplat.dll` entry points the backend uses, resolved at run time.
 pub struct MfApi {
     create_media_type: CreateFn,
-    create_sample: CreateFn,
-    create_memory_buffer: CreateBufferFn,
+    pub(crate) create_sample: CreateFn,
+    pub(crate) create_memory_buffer: CreateBufferFn,
     create_manager: CreateManagerFn,
-    enum_transforms: EnumFn,
+    pub(crate) enum_transforms: EnumFn,
 }
 
 /// The exported function `name` of `module` as a function pointer of type `F`.
@@ -94,7 +94,7 @@ fn load() -> Result<MfApi, String> {
 }
 
 /// An out-pointer COM creation function's result as an interface.
-fn made<T: Interface>(hr: HRESULT, raw: *mut c_void, what: &str) -> Result<T, String> {
+pub(crate) fn made<T: Interface>(hr: HRESULT, raw: *mut c_void, what: &str) -> Result<T, String> {
     if hr.is_err() || raw.is_null() {
         return Err(format!("{what} failed ({hr:?})"));
     }
@@ -104,7 +104,7 @@ fn made<T: Interface>(hr: HRESULT, raw: *mut c_void, what: &str) -> Result<T, St
 }
 
 impl MfApi {
-    pub(super) fn create_device_manager(&self, device: &ID3D11Device) -> Result<IMFDXGIDeviceManager, String> {
+    pub(crate) fn create_device_manager(&self, device: &ID3D11Device) -> Result<IMFDXGIDeviceManager, String> {
         let (mut token, mut raw) = (0u32, std::ptr::null_mut());
         // SAFETY: both out-pointers refer to live locals.
         let hr = unsafe { (self.create_manager)(&mut token, &mut raw) };
@@ -114,7 +114,7 @@ impl MfApi {
         Ok(manager)
     }
 
-    fn media_type(&self) -> Result<IMFMediaType, String> {
+    pub(crate) fn media_type(&self) -> Result<IMFMediaType, String> {
         let mut raw = std::ptr::null_mut();
         // SAFETY: the out-pointer refers to a live local.
         let hr = unsafe { (self.create_media_type)(&mut raw) };
