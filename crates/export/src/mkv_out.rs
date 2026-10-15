@@ -162,3 +162,41 @@ pub(crate) fn finish(intermediate_writer: Out, settings: &ExportSettings, pendin
     let _ = fs::remove_file(&pending.intermediate);
     Ok(len)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn av1_mkv_publish_replaces_existing_output_without_losing_data() {
+        let dir = std::env::temp_dir();
+        let (source, mut new_file) = reserve(&dir, "mkv").unwrap();
+        let (target, mut old_file) = reserve(&dir, "mkv").unwrap();
+        new_file.write_all(b"new verified container").unwrap();
+        old_file.write_all(b"old completed export").unwrap();
+        drop(new_file);
+        drop(old_file);
+        publish_complete_file(&source, &target).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"new verified container");
+        assert!(!source.exists(), "completed staging file must have been moved");
+        fs::remove_file(target).unwrap();
+    }
+
+    #[test]
+    fn av1_mkv_publish_keeps_staging_file_if_target_is_directory() {
+        let dir = std::env::temp_dir();
+        let (source, mut new_file) = reserve(&dir, "mkv").unwrap();
+        let (target, placeholder) = reserve(&dir, "mkv").unwrap();
+        new_file.write_all(b"complete verified container").unwrap();
+        drop(new_file);
+        drop(placeholder);
+        fs::remove_file(&target).unwrap();
+        fs::create_dir(&target).unwrap();
+        assert!(publish_complete_file(&source, &target).is_err());
+        assert_eq!(fs::read(&source).unwrap(), b"complete verified container");
+        assert!(target.is_dir());
+        fs::remove_file(source).unwrap();
+        fs::remove_dir(target).unwrap();
+    }
+}

@@ -80,8 +80,42 @@ mod windows_gpu {
             .args(["-pix_fmt", if ten_bit { "yuv420p10le" } else { "yuv420p" }, "-f", "rawvideo", "-"])
             .output()
             .expect("independent ffmpeg/libdav1d must be installed for hardware acceptance");
-        let _ = std::fs::remove_file(&path);
         assert!(decoded.status.success(), "{name} hardware AV1 MP4 failed independent decoding: {}", String::from_utf8_lossy(&decoded.stderr));
+        // Matroska is a lossless remux of the same finalized hardware AV1 packets:
+        // assert that its decoded pixels are identical to the original MP4.
+        let mkv = path.with_extension("mkv");
+        let remux = Command::new("ffmpeg")
+            .args(["-nostdin", "-hide_banner", "-v", "error", "-xerror", "-y", "-i"])
+            .arg(&path)
+            .args(["-map", "0", "-c", "copy", "-f", "matroska"])
+            .arg(&mkv)
+            .output()
+            .expect("FFmpeg Matroska muxer must be installed for hardware AV1 acceptance");
+        assert!(remux.status.success(), "{name} AV1 hardware MKV stream copy failed: {}", String::from_utf8_lossy(&remux.stderr));
+        let mkv_decoded = Command::new("ffmpeg")
+            .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+            .arg(&mkv)
+            .args(["-pix_fmt", if ten_bit { "yuv420p10le" } else { "yuv420p" }, "-f", "rawvideo", "-"])
+            .output()
+            .expect("independent libdav1d Matroska decode");
+        assert!(mkv_decoded.status.success(), "{name} MKV decoding failed: {}", String::from_utf8_lossy(&mkv_decoded.stderr));
+        assert_eq!(mkv_decoded.stdout, decoded.stdout, "{name} changed decoded AV1 pixels during MP4-to-MKV stream copy");
+        let probe = Command::new("ffprobe")
+            .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name,pix_fmt,color_primaries,color_transfer,color_space", "-of", "default=noprint_wrappers=1"])
+            .arg(&mkv)
+            .output()
+            .expect("ffprobe is required for real GPU acceptance");
+        assert!(probe.status.success(), "{name} Matroska stream inspection failed");
+        let metadata = String::from_utf8_lossy(&probe.stdout);
+        assert!(metadata.contains("codec_name=av1"), "{name} MKV does not contain AV1: {metadata}");
+        assert!(metadata.contains(if ten_bit { "pix_fmt=yuv420p10le" } else { "pix_fmt=yuv420p" }), "{name} MKV pixel format wrong: {metadata}");
+        if ten_bit {
+            for expected in ["color_primaries=bt2020", "color_transfer=smpte2084", "color_space=bt2020nc"] {
+                assert!(metadata.contains(expected), "{name} Matroska lost PQ HDR signaling {expected}: {metadata}");
+            }
+        }
+        let _ = std::fs::remove_file(&mkv);
+        let _ = std::fs::remove_file(&path);
         assert_eq!(
             decoded.stdout.len(),
             (w * h * 3 / 2 * 16 * if ten_bit { 2 } else { 1 }) as usize,
