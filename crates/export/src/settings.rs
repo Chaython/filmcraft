@@ -708,7 +708,13 @@ impl ExportSettings {
                     } else {
                         "hardware Auto (native software fallback)"
                     };
-                    v += &format!(", AV1 {}, {}, {} range, {}", self.av1_pixel_format.label(), encoder, if self.av1_full_range { "full" } else { "limited" }, self.bitrate_mode.label());
+                    v += &format!(
+                        ", AV1 {}, {}, {} range, {}",
+                        self.av1_pixel_format.label(),
+                        encoder,
+                        if self.av1_full_range { "full" } else { "limited" },
+                        self.bitrate_mode.label()
+                    );
                     v += &match self.bitrate_mode {
                         BitrateMode::Cbr => format!(", {}", mbps(r.target_kbps)),
                         BitrateMode::Crf => format!(" {}", self.crf),
