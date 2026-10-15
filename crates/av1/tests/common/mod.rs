@@ -234,7 +234,11 @@ fn check_file_inner(ff: &Path, name: &str, path: &Path, expected_pix_fmt: Option
         if let Some((depth, ssx, ssy, mono)) = expected {
             assert!(!pics.is_empty(), "{name}: no decoded frames for {fmt}");
             for (i, p) in pics.iter().enumerate() {
-                assert_eq!((p.bit_depth, p.subsampling_x, p.subsampling_y, p.mono_chrome), (depth, ssx, ssy, mono), "{name}: decoded AV1 pixel format differs from encoder input {fmt} at frame {i}");
+                assert_eq!(
+                    (p.bit_depth, p.subsampling_x, p.subsampling_y, p.mono_chrome),
+                    (depth, ssx, ssy, mono),
+                    "{name}: decoded AV1 pixel format differs from encoder input {fmt} at frame {i}"
+                );
             }
         }
     }
