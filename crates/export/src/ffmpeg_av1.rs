@@ -332,7 +332,13 @@ impl FfmpegAv1Encoder {
             self.signal.matrix,
             u8::from(self.full_range)
         );
-        let result = cmd.args(["-bsf:v"]).arg(bsf).args(["-f", "ivf"]).arg(&self.ivf_path).output().map_err(|e| ExportError::Encode(format!("cannot launch FFmpeg/libaom: {e}")))?;
+        let result = cmd
+            .args(["-bsf:v"])
+            .arg(bsf)
+            .args(["-f", "ivf"])
+            .arg(&self.ivf_path)
+            .output()
+            .map_err(|e| ExportError::Encode(format!("cannot launch FFmpeg/libaom: {e}")))?;
         if !result.status.success() {
             return Err(ExportError::Encode(format!(
                 "FFmpeg/libaom AV1 export failed (format {}): {}",
@@ -505,10 +511,7 @@ mod tests {
             return;
         }
         let hdr = vec![0.5f32; 64 * 64 * 3];
-        for (signal, full_range, pixel_format) in [
-            (ColorSignal::PQ, false, Av1PixelFormat::Yuv420p10),
-            (ColorSignal::HLG, true, Av1PixelFormat::Yuv444p12),
-        ] {
+        for (signal, full_range, pixel_format) in [(ColorSignal::PQ, false, Av1PixelFormat::Yuv420p10), (ColorSignal::HLG, true, Av1PixelFormat::Yuv444p12)] {
             let settings = ExportSettings {
                 format: Format::Av1,
                 av1_pixel_format: pixel_format,
@@ -530,5 +533,4 @@ mod tests {
             ));
         }
     }
-
 }
