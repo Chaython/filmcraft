@@ -128,5 +128,8 @@ pub(crate) fn finish(intermediate_writer: Out, settings: &ExportSettings, pendin
         }
     }
     drop(guard);
+    // A completed queue job can remain in memory after reporting Done; release
+    // the potentially large temporary MP4 immediately, not only on Exporter drop.
+    let _ = fs::remove_file(&pending.intermediate);
     Ok(len)
 }
