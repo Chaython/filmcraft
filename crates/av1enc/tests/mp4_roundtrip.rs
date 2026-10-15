@@ -21,7 +21,7 @@ fn test_av1enc_mp4_mux_and_decode() {
 
     let av1c = Av1Config {
         seq_profile: 0,
-        seq_level_idx_0: 8,
+        seq_level_idx_0: enc.sequence_level_idx(),
         seq_tier_0: false,
         high_bitdepth: false,
         twelve_bit: false,
