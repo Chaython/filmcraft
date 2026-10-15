@@ -496,4 +496,39 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn libaom_hdr_pq_hlg_and_full_range_match_bitstream() {
+        let strict = std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() == Ok("1");
+        let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+        if Command::new(ffmpeg).arg("-version").output().is_err() {
+            assert!(!strict, "FFmpeg/libaom is mandatory for Linux HDR AV1 conformance");
+            return;
+        }
+        let hdr = vec![0.5f32; 64 * 64 * 3];
+        for (signal, full_range, pixel_format) in [
+            (ColorSignal::PQ, false, Av1PixelFormat::Yuv420p10),
+            (ColorSignal::HLG, true, Av1PixelFormat::Yuv444p12),
+        ] {
+            let settings = ExportSettings {
+                format: Format::Av1,
+                av1_pixel_format: pixel_format,
+                av1_full_range: full_range,
+                signal,
+                bitrate_mode: BitrateMode::Crf,
+                ..Default::default()
+            };
+            let mut encoder = FfmpegAv1Encoder::new(64, 64, FrameRate::FPS_24, &settings).expect("HDR libaom instance");
+            let input = EncoderFrame { width: 64, height: 64, rgba: &[], hdr: Some(&hdr), index: 0 };
+            encoder.encode(&input).expect("high precision HDR buffer");
+            assert_eq!(encoder.flush().expect("libaom PQ/HLG stream").len(), 1);
+            let entry = encoder.final_sample_entry().expect("validated HDR sequence header").expect("AV1 entry");
+            let color = entry.video.as_ref().and_then(|v| v.color.as_ref()).expect("nclx");
+            assert!(matches!(
+                color,
+                ColorInfo::Nclx { primaries, transfer, matrix, full_range: range }
+                    if *primaries == 9 && *transfer == signal.transfer as u16 && *matrix == 9 && *range == full_range
+            ));
+        }
+    }
+
 }
