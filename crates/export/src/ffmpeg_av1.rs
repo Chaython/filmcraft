@@ -481,7 +481,7 @@ mod tests {
             return;
         }
         let rgba = vec![128u8; 64 * 64 * 4];
-        for fmt in [Av1PixelFormat::Yuv420p12, Av1PixelFormat::Yuv422p10, Av1PixelFormat::Yuv444p12] {
+        for fmt in Av1PixelFormat::ALL {
             let settings = ExportSettings { format: Format::Av1, av1_pixel_format: fmt, bitrate_mode: BitrateMode::Crf, crf: 35.0, ..Default::default() };
             let mut enc = FfmpegAv1Encoder::new(64, 64, FrameRate::FPS_24, &settings).expect("FFmpeg encoder");
             for i in 0..2u64 {
@@ -493,7 +493,7 @@ mod tests {
             let entry = enc.final_sample_entry().expect("validated av1C").expect("video entry");
             match entry.codec {
                 filmcraft_isobmff::CodecConfig::Av1(config) => {
-                    assert_eq!((config.high_bitdepth, config.twelve_bit), (true, fmt.bit_depth() == 12));
+                    assert_eq!((config.high_bitdepth, config.twelve_bit), (fmt.bit_depth() > 8, fmt.bit_depth() == 12));
                     let (sx, sy) = fmt.chroma_shift();
                     assert_eq!((config.chroma_subsampling_x, config.chroma_subsampling_y), (sx != 0, sy != 0));
                     assert!(!config.config_obus.is_empty(), "real AV1 sequence OBU required");
