@@ -1783,7 +1783,9 @@ fn av1_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettin
     // The current software encoder accepts only BT.709 SDR 8-bit 4:2:0.
     // Never silently export 8-bit pixels carrying PQ/HLG tags as HDR.
     if s.signal.is_hdr() || s.signal != ColorSignal::default() {
-        return Some(Err(ExportError::Unsupported("software AV1 supports 8-bit BT.709 SDR only; select a compatible HDR hardware encoder or export SDR".into())));
+        return Some(Err(ExportError::Unsupported(
+            "software AV1 supports 8-bit BT.709 SDR only; select a compatible HDR hardware encoder or export SDR".into(),
+        )));
     }
     let mut cfg = filmcraft_av1enc::EncoderConfig::new(w, h, rate.num.max(1) as u32, rate.den.max(1) as u32);
     let keyint = s.keyframe_distance.filter(|k| *k > 0).unwrap_or_else(|| ((rate.num as f64 / rate.den.max(1) as f64) * 2.0).round().max(1.0) as u32);

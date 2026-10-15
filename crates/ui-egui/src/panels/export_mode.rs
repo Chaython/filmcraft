@@ -731,9 +731,15 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             row(ui, t, tl!("Bitrate Encoding"), |ui| {
                 // AV1 CRF uses the software encoder; NVENC/AMF/QSV may decline that mode.
                 let o = [BitrateMode::Cbr, BitrateMode::Vbr1Pass, BitrateMode::Vbr2Pass, BitrateMode::Crf];
-                let labels: Vec<(String, bool)> = o.iter().map(|m| {
-                    (m.label().to_string(), !((hevc && matches!(m, BitrateMode::Vbr2Pass | BitrateMode::Crf)) || (av1 && matches!(m, BitrateMode::Vbr2Pass))))
-                }).collect();
+                let labels: Vec<(String, bool)> = o
+                    .iter()
+                    .map(|m| {
+                        (
+                            m.label().to_string(),
+                            !((hevc && matches!(m, BitrateMode::Vbr2Pass | BitrateMode::Crf)) || (av1 && matches!(m, BitrateMode::Vbr2Pass))),
+                        )
+                    })
+                    .collect();
                 if let Some(i) = combo(ui, reg, "export.video.bitrateMode", s.bitrate_mode.label(), &labels, 140.0) {
                     s.bitrate_mode = o[i];
                 }

@@ -9,8 +9,8 @@ pub mod session;
 
 use std::sync::OnceLock;
 
-use filmcraft_time::FrameRate;
 use self::device::IntelGpu;
+use filmcraft_time::FrameRate;
 
 static HEVC_AVAILABLE: OnceLock<bool> = OnceLock::new();
 static HEVC_HDR_AVAILABLE: OnceLock<bool> = OnceLock::new();
@@ -85,11 +85,10 @@ fn probe_codec_av1(ten_bit: bool) -> bool {
 
 #[cfg(target_os = "windows")]
 fn probe_codec_win(codec: session::Codec, profile: session::Profile, ten_bit: bool) -> bool {
-    if !has_device() { return false; }
-    session::QsvSession::new(session::Config {
-        codec, profile, size: (640, 360), rate: FrameRate::FPS_24,
-        bitrate_kbps: 2_000, keyint: 24, ten_bit,
-    }).is_ok()
+    if !has_device() {
+        return false;
+    }
+    session::QsvSession::new(session::Config { codec, profile, size: (640, 360), rate: FrameRate::FPS_24, bitrate_kbps: 2_000, keyint: 24, ten_bit }).is_ok()
 }
 
 #[cfg(not(target_os = "windows"))]
