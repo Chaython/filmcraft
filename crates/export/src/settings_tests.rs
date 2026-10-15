@@ -1033,6 +1033,49 @@ fn av1_mkv_high_bitdepth_444_roundtrip() {
 }
 
 #[test]
+fn av1_mkv_flac_and_pcm_audio_tracks_roundtrip() {
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "FFmpeg is required for MKV FLAC/PCM tests");
+        return;
+    }
+    let (project, seq, sources) = matte([0.1, 0.6, 0.3, 1.0], 128, 96, Some(-9.0));
+    let dir = Scratch::new("av1-mkv-audio-formats");
+    for (codec, bits, name, expected) in [
+        (AudioCodec::Flac, 24, "flac.mkv", "flac"),
+        (AudioCodec::Pcm, 16, "pcm.mkv", "pcm_s16le"),
+    ] {
+        let path = dir.path(name);
+        let settings = ExportSettings {
+            format: Format::Av1,
+            multiplexer: Multiplexer::Mkv,
+            hardware_encoding: HardwareEncoding::Off,
+            bitrate_mode: BitrateMode::Crf,
+            crf: 35.0,
+            include_audio: true,
+            audio: AudioSettings { codec, bits, ..Default::default() },
+            path: path.clone(),
+            range: Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(3))),
+            ..Default::default()
+        };
+        export(&project, seq, &settings, &sources, &Progress::default()).expect("AV1 + lossless audio MKV export");
+        let probe = ffprobe_json(&["-show_entries", "stream=codec_name,codec_type"], &path).expect("inspect Matroska audio codec");
+        let streams = probe["streams"].as_array().expect("video and audio streams");
+        assert!(streams.iter().any(|stream| stream["codec_name"] == "av1"), "{name}: no video: {probe}");
+        assert!(streams.iter().any(|stream| stream["codec_name"] == expected && stream["codec_type"] == "audio"), "{name}: wrong audio mapping: {probe}");
+        let decode = std::process::Command::new(&ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+            .arg(&path)
+            .args(["-map", "0", "-f", "null", "-"])
+            .output()
+            .expect("decode Matroska video and lossless soundtrack");
+        assert!(decode.status.success(), "{name}: audio/video decode failure: {}", String::from_utf8_lossy(&decode.stderr));
+    }
+    let files = files_in(&dir.0);
+    assert_eq!(files, ["flac.mkv", "pcm.mkv"], "completed MKV jobs must leave neither staging MP4s nor backup files");
+}
+
+#[test]
 fn av1_mkv_pq_and_hlg_colour_metadata_survives_remux() {
     let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
     if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
