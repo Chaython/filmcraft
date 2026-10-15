@@ -48,6 +48,23 @@ fn test_av1enc_mp4_mux_and_decode() {
     let mp4_bytes = cursor.into_inner();
     assert!(!mp4_bytes.is_empty(), "MP4 bytes must not be empty");
 
+    // Independent decoder oracle: acceptance must not rely solely on FilmCraft's own AV1 decoder.
+    // ffmpeg is a test-only executable, not linked, bundled or shipped with FilmCraft.
+    if std::process::Command::new("ffmpeg").arg("-version").output().is_ok_and(|o| o.status.success()) {
+        let path = filmcraft_testkit::temp_path(&filmcraft_testkit::fixtures_dir("av1enc-external-oracle").join("flat-main.mp4"));
+        std::fs::write(&path, &mp4_bytes).unwrap();
+        let decoded = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-v", "error", "-xerror", "-i"])
+            .arg(&path)
+            .args(["-f", "null", "-"])
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(decoded.status.success(), "independent ffmpeg AV1 decode failed: {}", String::from_utf8_lossy(&decoded.stderr));
+    } else {
+        eprintln!("SKIPPED independent AV1 oracle: ffmpeg is not installed");
+    }
+
     // Open MP4 and verify demux
     let mp4 = filmcraft_isobmff::open(&mp4_bytes).unwrap();
     let tracks = &mp4.tracks;
