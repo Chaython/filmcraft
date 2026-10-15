@@ -1,0 +1,38 @@
+name: AV1 integration gates
+
+on:
+  push:
+    branches: [av1-nvenc-integration]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  av1:
+    name: AV1 codecs / platform (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate workspace formatting
+        run: cargo fmt --all -- --check
+      - name: Check AV1 encoder, decoder, export, Windows/VA-API integration
+        run: cargo check -p filmcraft-av1 -p filmcraft-av1enc -p filmcraft-codecs -p filmcraft-export -p filmcraft-platform --all-targets
+      - name: AV1 decoder / encoder unit tests
+        run: cargo test -p filmcraft-av1 -p filmcraft-av1enc --lib
+      - name: AV1 integration and pixel format tests
+        run: cargo test -p filmcraft-codecs --lib
+      - name: Strict lint on changed crates
+        run: cargo clippy -p filmcraft-av1 -p filmcraft-av1enc -p filmcraft-codecs -p filmcraft-export -p filmcraft-platform --all-targets -- -D warnings
