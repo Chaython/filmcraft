@@ -217,6 +217,7 @@ pub struct FfmpegAv1Encoder {
     crf: f32,
     keyint: u32,
     frames: u64,
+    first_index: Option<u64>,
     config: Option<Av1Config>,
     finished: bool,
 }
@@ -262,6 +263,7 @@ impl FfmpegAv1Encoder {
             crf: settings.crf,
             keyint: settings.keyframe_distance.unwrap_or(48).max(1),
             frames: 0,
+            first_index: None,
             config: None,
             finished: false,
         })
@@ -439,8 +441,16 @@ impl VideoEncoder for FfmpegAv1Encoder {
         if frame.width != self.width || frame.height != self.height {
             return Err(ExportError::Unsupported("AV1 frame dimensions changed during export".into()));
         }
+        if let Some(first) = self.first_index
+            && first.checked_add(self.frames) != Some(frame.index)
+        {
+            return Err(ExportError::Unsupported("AV1 input frame indices must be consecutive to preserve timestamps".into()));
+        }
         let raw = self.raw.as_mut().ok_or_else(|| ExportError::Io("AV1 raw spool has closed".into()))?;
         write_planar(frame, self.format, self.signal, self.full_range, raw)?;
+        if self.first_index.is_none() {
+            self.first_index = Some(frame.index);
+        }
         self.frames = self.frames.checked_add(1).ok_or_else(|| ExportError::Unsupported("too many AV1 frames".into()))?;
         Ok(Vec::new())
     }
