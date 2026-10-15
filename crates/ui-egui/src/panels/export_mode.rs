@@ -709,7 +709,7 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     (false, _) => tl!("Main (8-bit)"),
                 };
                 row(ui, t, tl!("Profile"), |ui| ui.label(label));
-                row(ui, t, tl!("Encoder"), |ui| ui.label(tl!("Hardware (AV1 has no software encoder)")));
+                row(ui, t, tl!("Encoder"), |ui| ui.label(tl!("Hardware (Auto) / Software fallback (8-bit)")));
             } else {
                 row(ui, t, tl!("Profile"), |ui| {
                     let o = [H264Profile::Baseline, H264Profile::Main, H264Profile::High];
