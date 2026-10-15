@@ -66,6 +66,16 @@ Remove-Item Env:FILMCRAFT_TEST_NVENC_AV1
 
 These tests fail (rather than skip) when opted in but the GPU cannot encode; they require actual hardware frames, real AV1 sequence headers, MP4 packaging and successful independent libdav1d decoding of 16 complete frames. Enable the application integration separately with `FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS=1`. PQ/HLG Main10 still needs separate real GPU colorimetry/HDR validation.
 
+## Matroska (.mkv) export
+
+FilmCraft's AV1 Export ▸ Multiplexer selector now offers **MP4, QuickTime, and Matroska (MKV)**. The MKV path accepts the same AV1 encoded packets as MP4: NVIDIA NVENC Main/Main10, optional AMD AMF/Intel QSV behind their experimental flag, native 8-bit SDR, and high-bit-depth FFmpeg/libaom. AAC, FLAC, or PCM audio tracks are stream-copied with the video when present. No second encode takes place, so changing containers does **not** improve or reduce encoded image quality.
+
+For now, MKV export uses a disk-backed intermediate MP4 with the finalized encoder-provided `av1C`, then calls local **FFmpeg's Matroska muxer** (`-map 0 -c copy`). This is intentional: Matroska requires a real AV1CodecConfigurationRecord in `CodecPrivate` when Tracks are written, while some hardware encoders only expose the AV1 sequence header during/after encoding. The converter does not use a shell, writes to a unique temporary filename, cleans intermediates on failure/cancellation, and reports success only after writing a nonempty MKV. The final export path is not created during rendering.
+
+FFmpeg must be on PATH or specified by `FILMCRAFT_FFMPEG`. A missing executable returns an actionable error before rendering starts. The existing native Matroska muxer may eventually replace the intermediate remux once it supports late-bound AV1 codec configuration. This integration deliberately enables MKV only for AV1; switching another format to MKV is rejected rather than silently writing MP4 under an MKV extension.
+
+The integration test exports real AV1 + AAC to MKV, verifies its EBML magic bytes, probes both streams, and decodes the result with independent FFmpeg/libdav1d. Hardware encoder acceptance remains a separate real-GPU requirement.
+
 ## Safety gates
 
 1. `cargo fmt --all -- --check`
