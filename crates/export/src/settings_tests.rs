@@ -977,8 +977,7 @@ fn av1_mkv_muxer_preserves_video_and_aac_without_transcoding() {
     let bytes = std::fs::read(&path).expect("written Matroska file");
     assert!(bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]), "must be EBML/Matroska and not a renamed MP4");
     assert_eq!(report.bytes, bytes.len() as u64);
-    let probe = ffprobe_json(&["-show_entries", "stream=codec_name,codec_type:format=format_name"], &path)
-        .expect("ffprobe AV1 Matroska file");
+    let probe = ffprobe_json(&["-show_entries", "stream=codec_name,codec_type:format=format_name"], &path).expect("ffprobe AV1 Matroska file");
     let streams = probe["streams"].as_array().expect("Matroska streams");
     assert!(streams.iter().any(|stream| stream["codec_name"] == "av1" && stream["codec_type"] == "video"), "AV1 video missing: {probe}");
     assert!(streams.iter().any(|stream| stream["codec_name"] == "aac" && stream["codec_type"] == "audio"), "AAC soundtrack missing: {probe}");
