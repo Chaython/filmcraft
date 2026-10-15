@@ -68,6 +68,36 @@ pub enum Availability {
     Unavailable(&'static str),
 }
 
+// The opt-in AMD/Intel integration must not accidentally take over existing H.264
+// or HEVC exports; it is explicitly limited to AV1 until those paths are validated.
+#[cfg(target_os = "windows")]
+fn experimental_amf_av1(
+    format: filmcraft_export::Format,
+    width: u32,
+    height: u32,
+    rate: filmcraft_time::FrameRate,
+    settings: &filmcraft_export::ExportSettings,
+) -> Option<filmcraft_export::Result<Box<dyn filmcraft_export::VideoEncoder>>> {
+    if format != filmcraft_export::Format::Av1 {
+        return None;
+    }
+    amf::export::factory(format, width, height, rate, settings)
+}
+
+#[cfg(target_os = "windows")]
+fn experimental_qsv_av1(
+    format: filmcraft_export::Format,
+    width: u32,
+    height: u32,
+    rate: filmcraft_time::FrameRate,
+    settings: &filmcraft_export::ExportSettings,
+) -> Option<filmcraft_export::Result<Box<dyn filmcraft_export::VideoEncoder>>> {
+    if format != filmcraft_export::Format::Av1 {
+        return None;
+    }
+    qsv::export::factory(format, width, height, rate, settings)
+}
+
 /// Register the platform's hardware video decoders (call once at startup; repeated calls are
 /// harmless). Streams they do not take, and every stream while hardware decoding is Off, keep
 /// using FilmCraft's own decoders.
@@ -117,8 +147,8 @@ pub fn register() -> Availability {
         // export only when asked for and when NVENC can do it
         ENCODERS.call_once(|| {
             if std::env::var("FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS").as_deref() == Ok("1") {
-                filmcraft_export::register_encoder(amf::export::factory);
-                filmcraft_export::register_encoder(qsv::export::factory);
+                filmcraft_export::register_encoder(experimental_amf_av1);
+                filmcraft_export::register_encoder(experimental_qsv_av1);
             }
             filmcraft_export::register_encoder(nvenc::export::factory);
         });
