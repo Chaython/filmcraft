@@ -1875,7 +1875,11 @@ fn av1_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettin
     if format != Format::Av1 {
         return None;
     }
-    if s.av1_pixel_format != Av1PixelFormat::Yuv420p8 || s.av1_full_range {
+    // Matroska requires independently decodable temporal units. The early-stage
+    // native 8-bit AV1 writer can emit packets that libdav1d rejects, so route
+    // MKV's software fallback through the tested libaom bitstream encoder.
+    // NVENC/AMF/QSV factories are tried first when hardware is selected.
+    if s.multiplexer == settings::Multiplexer::Mkv || s.av1_pixel_format != Av1PixelFormat::Yuv420p8 || s.av1_full_range {
         return ffmpeg_av1::factory(format, w, h, rate, s);
     }
     // The current software encoder accepts only BT.709 SDR 8-bit 4:2:0.
