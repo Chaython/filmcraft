@@ -12,7 +12,7 @@ pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettin
     let codec = match format {
         Format::H264 if s.hardware_encoding == HardwareEncoding::Auto => Codec::H264,
         Format::Hevc => Codec::Hevc,
-        Format::Av1 => Codec::Av1,
+        Format::Av1 if s.hardware_encoding == HardwareEncoding::Auto && s.bitrate_mode != BitrateMode::Crf => Codec::Av1,
         _ => return None,
     };
 
@@ -139,19 +139,11 @@ impl AmfEncoder {
                     }
                 }
             } else if self.av1c.is_none() {
-                self.av1c = Some(filmcraft_isobmff::Av1Config {
-                    seq_profile: 0,
-                    seq_level_idx_0: 0,
-                    seq_tier_0: false,
-                    high_bitdepth: self.session.is_ten_bit(),
-                    twelve_bit: false,
-                    monochrome: false,
-                    chroma_subsampling_x: true,
-                    chroma_subsampling_y: true,
-                    chroma_sample_position: 0,
-                    initial_presentation_delay_minus_one: None,
-                    config_obus: Vec::new(),
-                });
+                if let Ok(config) = crate::nvenc::av1::av1_config(&p.data, self.session.is_ten_bit()) {
+                    self.av1c = Some(config);
+                } else if p.key {
+                    return Err(ExportError::Unsupported("AMD AMF AV1 keyframe contains no valid sequence header: cannot write trustworthy av1C".into()));
+                }
             }
 
             let data = if is_av1 {
@@ -173,6 +165,16 @@ impl AmfEncoder {
 }
 
 impl VideoEncoder for AmfEncoder {
+    fn final_sample_entry(&self) -> Result<Option<SampleEntry>> {
+        if self.session.codec() == Codec::Av1 {
+            if self.av1c.is_none() {
+                return Err(ExportError::Unsupported("AMD AMF AV1 did not emit a verifiable Sequence Header OBU".into()));
+            }
+            return Ok(Some(self.sample_entry()));
+        }
+        Ok(None)
+    }
+
     fn sample_entry(&self) -> SampleEntry {
         let (w, h) = (u16::try_from(self.w).unwrap_or(u16::MAX), u16::try_from(self.h).unwrap_or(u16::MAX));
         match self.session.codec() {

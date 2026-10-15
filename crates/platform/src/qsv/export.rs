@@ -26,10 +26,12 @@ pub struct QsvEncoder {
     sps: Vec<u8>,
     pps: Vec<u8>,
     vps: Vec<u8>,
+    av1c: Option<filmcraft_isobmff::Av1Config>,
+    ten_bit: bool,
 }
 
 impl QsvEncoder {
-    fn new(session: QsvSession, codec: Codec, w: u32, h: u32, rate: FrameRate, signal: ColorSignal) -> Self {
+    fn new(session: QsvSession, codec: Codec, w: u32, h: u32, rate: FrameRate, signal: ColorSignal, ten_bit: bool) -> Self {
         Self {
             session,
             codec,
@@ -46,6 +48,8 @@ impl QsvEncoder {
             sps: Vec::new(),
             pps: Vec::new(),
             vps: Vec::new(),
+            av1c: None,
+            ten_bit,
         }
     }
 
@@ -55,7 +59,13 @@ impl QsvEncoder {
 
         let mut out = Vec::with_capacity(ps.len());
         for p in ps {
-            self.extract_headers(&p.data);
+            if self.codec == Codec::Av1 && self.av1c.is_none() {
+                if let Ok(config) = crate::nvenc::av1::av1_config(&p.data, self.ten_bit) {
+                    self.av1c = Some(config);
+                }
+            } else {
+                self.extract_headers(&p.data);
+            }
             let comp_offset = i32::try_from((p.pts.saturating_sub(p.dts)).saturating_mul(den)).unwrap_or(0);
             out.push(EncodedPacket { data: p.data, key: p.key, duration, composition_offset: comp_offset });
         }
@@ -110,6 +120,16 @@ impl QsvEncoder {
 }
 
 impl VideoEncoder for QsvEncoder {
+    fn final_sample_entry(&self) -> Result<Option<SampleEntry>> {
+        if self.codec == Codec::Av1 {
+            if self.av1c.is_none() {
+                return Err(ExportError::Unsupported("Intel QSV AV1 did not emit a verifiable Sequence Header OBU".into()));
+            }
+            return Ok(Some(self.sample_entry()));
+        }
+        Ok(None)
+    }
+
     fn encode(&mut self, f: &EncoderFrame<'_>) -> Result<Vec<EncodedPacket>> {
         if f.width != self.w || f.height != self.h {
             return Err(ExportError::Encode(format!("Intel: a {}x{} picture for a {}x{} encoder", f.width, f.height, self.w, self.h)));
@@ -156,7 +176,7 @@ impl VideoEncoder for QsvEncoder {
                 e
             }
             Codec::Av1 => {
-                let mut e = SampleEntry::av1(filmcraft_isobmff::Av1Config::default(), w, h);
+                let mut e = SampleEntry::av1(self.av1c.clone().unwrap_or_default(), w, h);
                 self.signal.apply_to(&mut e, false);
                 e
             }
@@ -177,7 +197,7 @@ pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettin
     let codec = match format {
         Format::H264 if s.hardware_encoding == HardwareEncoding::Auto => Codec::H264,
         Format::Hevc => Codec::Hevc,
-        Format::Av1 => Codec::Av1,
+        Format::Av1 if s.hardware_encoding == HardwareEncoding::Auto && s.bitrate_mode != BitrateMode::Crf => Codec::Av1,
         _ => return None,
     };
 
@@ -205,5 +225,5 @@ pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettin
     };
 
     filmcraft_export::note_hw_encode_session();
-    Some(Ok(Box::new(QsvEncoder::new(session, codec, w, h, rate, s.signal))))
+    Some(Ok(Box::new(QsvEncoder::new(session, codec, w, h, rate, s.signal, is_hdr))))
 }

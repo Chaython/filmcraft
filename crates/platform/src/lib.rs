@@ -98,16 +98,30 @@ pub fn register() -> Availability {
         filmcraft_export::register_hdr_probe(filmcraft_export::Format::Av1, nvenc::av1_hdr_available);
         nvenc::warm_hevc_probe();
         nvenc::warm_av1_probe();
-        // AMF / QSV sources are staged but not registered. Their factories do not yet
-        // provide verified av1C/hvcC data when the MP4 muxer constructs its track.
-        // Advertising them here would risk malformed or mislabeled output.
+        // Opt-in for additional Windows hardware backends. A final av1C is written
+        // only after a real keyframe supplied parseable AV1 Sequence Header OBUs.
+        // Hardware acceptance is still experimental on AMD/Intel GPUs.
+        if std::env::var("FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS").as_deref() == Ok("1") {
+            filmcraft_export::register_format_probe(filmcraft_export::Format::Av1, amf::av1_available);
+            filmcraft_export::register_format_probe(filmcraft_export::Format::Av1, qsv::av1_available);
+            filmcraft_export::register_hdr_probe(filmcraft_export::Format::Av1, amf::av1_hdr_available);
+            filmcraft_export::register_hdr_probe(filmcraft_export::Format::Av1, qsv::av1_hdr_available);
+            amf::warm_av1_probe();
+            qsv::warm_av1_probe();
+        }
     }
     #[cfg(target_os = "windows")]
     {
         static ENCODERS: std::sync::Once = std::sync::Once::new();
         // Export ▸ Hardware encoding (NVENC H.264): in front of the software encoder, taking an
         // export only when asked for and when NVENC can do it
-        ENCODERS.call_once(|| filmcraft_export::register_encoder(nvenc::export::factory));
+        ENCODERS.call_once(|| {
+            if std::env::var("FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS").as_deref() == Ok("1") {
+                filmcraft_export::register_encoder(amf::export::factory);
+                filmcraft_export::register_encoder(qsv::export::factory);
+            }
+            filmcraft_export::register_encoder(nvenc::export::factory);
+        });
         filmcraft_codecs::register_video_decoder(media_foundation_factory);
         filmcraft_codecs::hw::set_hw_backend("Media Foundation");
         Availability::Available("Media Foundation")
