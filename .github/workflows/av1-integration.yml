@@ -26,6 +26,13 @@ jobs:
           toolchain: "1.95.0"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install independent AV1 codec oracle on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -hide_banner -encoders 2>/dev/null | grep -q 'libaom-av1'
+          ffmpeg -hide_banner -decoders 2>/dev/null | grep -q 'libdav1d'
       - name: Validate workspace formatting
         run: cargo fmt --all -- --check
       - name: Check AV1 encoder, decoder, export, Windows/VA-API integration
