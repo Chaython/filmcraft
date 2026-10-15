@@ -24,14 +24,14 @@ pub fn ffmpeg_libaom() -> Option<PathBuf> {
 /// Builds such as the Windows "essentials" ones lack these libraries; skip rather than fail.
 fn ffmpeg_with(needs: &[(&str, &str)]) -> Option<PathBuf> {
     let ff = filmcraft_testkit::ffmpeg_or_skip("av1 oracle");
-    if std::env::var_os("FILMCRAFT_REQUIRE_AV1_ORACLE").is_some() {
+    if std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() == Ok("1") {
         assert!(ff.is_some(), "CI requires FFmpeg for independent AV1 conformance checks");
     }
     let ff = ff?;
     for &(list, lib) in needs {
         let out = Command::new(&ff).args(["-hide_banner", list]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
         if !out.contains(lib) {
-            if std::env::var_os("FILMCRAFT_REQUIRE_AV1_ORACLE").is_some() {
+            if std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() == Ok("1") {
                 panic!("CI requires FFmpeg with {lib} (see `ffmpeg {list}`)");
             }
             filmcraft_testkit::skip("av1 oracle", &format!("ffmpeg has no {lib} (see `ffmpeg {list}`)"));

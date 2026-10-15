@@ -148,7 +148,7 @@ fn inter_12bit_profile_two() {
         .output()
         .is_ok_and(|o| o.status.success());
     if !available {
-        if std::env::var_os("FILMCRAFT_REQUIRE_AV1_ORACLE").is_some() {
+        if std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() == Ok("1") {
             panic!("CI requires a 12-bit-capable FFmpeg/libaom encoder");
         }
         filmcraft_testkit::skip("av1 12-bit oracle", "this ffmpeg/libaom build cannot encode yuv420p12le");

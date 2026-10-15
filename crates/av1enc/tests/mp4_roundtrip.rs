@@ -69,7 +69,7 @@ fn test_av1enc_mp4_mux_and_decode() {
             assert!(raw.iter().all(|&sample| sample == 128), "external AV1 decoder must reconstruct the exact constant YUV test image");
         }
     } else {
-        assert!(std::env::var_os("FILMCRAFT_REQUIRE_AV1_ORACLE").is_none(), "FFmpeg with libdav1d is required by AV1 CI");
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "FFmpeg with libdav1d is required by AV1 CI");
         eprintln!("SKIPPED independent AV1 oracle: ffmpeg is not installed");
     }
 
