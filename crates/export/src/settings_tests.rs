@@ -932,7 +932,8 @@ fn av1_is_an_mp4_format_with_builtin_encoder() {
     assert!((b as f64 - 25.4e6).abs() < 0.2e6, "{b}");
     let summary = a.summary(1920, 1088, FrameRate::FPS_25, 48_000, Tick(10 * TICKS_PER_SECOND));
     assert_eq!(summary.format, "AV1 (MP4)");
-    assert!(summary.video.contains("AV1 Main"), "{}", summary.video);
+    assert!(summary.video.contains("AV1 8-bit 4:2:0"), "{}", summary.video);
+    assert!(summary.video.contains("limited range"), "{}", summary.video);
     let e = ExportSettings { bitrate_mode: BitrateMode::Vbr2Pass, ..a.clone() }.validate().unwrap_err();
     assert!(e.to_string().contains("two-pass"), "{e}");
     assert!(Format::Av1.has_builtin_encoder());
