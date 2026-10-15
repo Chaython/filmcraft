@@ -13,13 +13,13 @@ mod windows_gpu {
 
     type HardwareFactory = fn(Format, u32, u32, FrameRate, &ExportSettings) -> Option<filmcraft_export::Result<Box<dyn VideoEncoder>>>;
 
-    fn run_gpu_encoder(name: &str, factory: HardwareFactory, ten_bit: bool) {
+    fn run_gpu_encoder(name: &str, factory: HardwareFactory, ten_bit: bool, hdr_input: bool) {
         let w = 320u32;
         let h = 240u32;
         let settings = ExportSettings {
             format: Format::Av1,
             av1_pixel_format: if ten_bit { Av1PixelFormat::Yuv420p10 } else { Av1PixelFormat::Yuv420p8 },
-            signal: if ten_bit { ColorSignal::PQ } else { ColorSignal::default() },
+            signal: if hdr_input { ColorSignal::PQ } else { ColorSignal::default() },
             hardware_encoding: HardwareEncoding::Auto,
             ..Default::default()
         };
@@ -32,7 +32,7 @@ mod windows_gpu {
         let hdr = vec![0.5f32; (w * h * 3) as usize];
         let mut packets = Vec::new();
         for i in 0..16u64 {
-            let frame = EncoderFrame { width: w, height: h, rgba: if ten_bit { &[] } else { &rgba }, hdr: ten_bit.then_some(hdr.as_slice()), index: i };
+            let frame = EncoderFrame { width: w, height: h, rgba: if hdr_input { &[] } else { &rgba }, hdr: hdr_input.then_some(hdr.as_slice()), index: i };
             packets.extend(encoder.encode(&frame).expect("encode 16 hardware AV1 frames"));
         }
         packets.extend(encoder.flush().expect("drain hardware encoder"));
@@ -47,11 +47,17 @@ mod windows_gpu {
             .expect("hardware AV1 config must contain an authentic Sequence Header OBU");
         let seq = filmcraft_av1::SequenceHeader::parse(header).expect("parse actual hardware AV1 sequence header");
         assert_eq!(seq.color.bit_depth, if ten_bit { 10 } else { 8 });
-        if ten_bit {
+        if hdr_input {
             assert_eq!(
                 (seq.color.color_primaries, seq.color.transfer_characteristics, seq.color.matrix_coefficients),
                 (9, 16, 9),
                 "{name} PQ Main10 bitstream signaling is missing or incorrect"
+            );
+        } else {
+            assert_eq!(
+                (seq.color.color_primaries, seq.color.transfer_characteristics, seq.color.matrix_coefficients),
+                (1, 1, 1),
+                "{name} BT.709 SDR bitstream is mislabeled"
             );
         }
         let mut bytes = Cursor::new(Vec::new());
@@ -118,7 +124,7 @@ mod windows_gpu {
         let metadata = String::from_utf8_lossy(&probe.stdout);
         assert!(metadata.contains("codec_name=av1"), "{name} MKV does not contain AV1: {metadata}");
         assert!(metadata.contains(if ten_bit { "pix_fmt=yuv420p10le" } else { "pix_fmt=yuv420p" }), "{name} MKV pixel format wrong: {metadata}");
-        if ten_bit {
+        if hdr_input {
             for expected in ["color_primaries=bt2020", "color_transfer=smpte2084", "color_space=bt2020nc"] {
                 assert!(metadata.contains(expected), "{name} Matroska lost PQ HDR signaling {expected}: {metadata}");
             }
@@ -138,7 +144,7 @@ mod windows_gpu {
             eprintln!("SKIPPED: set FILMCRAFT_TEST_AMD_AV1=1 on a Windows AMD AV1 encoding GPU");
             return;
         }
-        run_gpu_encoder("amd", filmcraft_platform::amf::export::factory, false);
+        run_gpu_encoder("amd", filmcraft_platform::amf::export::factory, false, false);
     }
 
     #[test]
@@ -147,7 +153,7 @@ mod windows_gpu {
             eprintln!("SKIPPED: set FILMCRAFT_TEST_INTEL_AV1=1 on a Windows Intel AV1 encoding GPU");
             return;
         }
-        run_gpu_encoder("intel", filmcraft_platform::qsv::export::factory, false);
+        run_gpu_encoder("intel", filmcraft_platform::qsv::export::factory, false, false);
     }
     #[test]
     fn nvidia_nvenc_main_and_main10_real_gpu_acceptance() {
@@ -155,7 +161,8 @@ mod windows_gpu {
             eprintln!("SKIPPED: set FILMCRAFT_TEST_NVENC_AV1=1 on an AV1-capable Windows NVIDIA GPU");
             return;
         }
-        run_gpu_encoder("nvidia-main", filmcraft_platform::nvenc::export::factory, false);
-        run_gpu_encoder("nvidia-main10", filmcraft_platform::nvenc::export::factory, true);
+        run_gpu_encoder("nvidia-main", filmcraft_platform::nvenc::export::factory, false, false);
+        run_gpu_encoder("nvidia-main10-sdr", filmcraft_platform::nvenc::export::factory, true, false);
+        run_gpu_encoder("nvidia-main10-hdr", filmcraft_platform::nvenc::export::factory, true, true);
     }
 }

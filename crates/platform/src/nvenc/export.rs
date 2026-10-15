@@ -123,7 +123,25 @@ impl VideoEncoder for NvencEncoder {
                 })?;
                 self.enc.encode_10(&self.y16, &self.u16, &self.v16, f.index).map_err(|e| ExportError::Encode(format!("NVENC: {e}{hint}")))?
             }
-            (true, None) => return Err(ExportError::Unsupported("NVENC Main 10 needs the HDR picture (EncoderFrame::hdr)".into())),
+            // SDR AV1 Main10 also accepts RGBA8 sources. Expand the quantized
+            // BT.709 limited-range 8-bit planes into P010 code values (x4).
+            // This is a 10-bit container/encode, not restored source precision.
+            (true, None) if self.enc.codec() == Codec::Av1 => {
+                if Some(f.rgba.len()) != w.checked_mul(h).and_then(|n| n.checked_mul(4)) {
+                    return Err(ExportError::Encode("NVENC SDR Main10 needs exactly width*height*4 RGBA8 bytes".into()));
+                }
+                filmcraft_export::timed(filmcraft_export::Stage::Convert, || {
+                    filmcraft_export::rgba_to_yuv420_8(f.rgba, w, h, &mut self.y, &mut self.u, &mut self.v);
+                    self.y16.clear();
+                    self.y16.extend(self.y.iter().map(|&sample| u16::from(sample) << 2));
+                    self.u16.clear();
+                    self.u16.extend(self.u.iter().map(|&sample| u16::from(sample) << 2));
+                    self.v16.clear();
+                    self.v16.extend(self.v.iter().map(|&sample| u16::from(sample) << 2));
+                });
+                self.enc.encode_10(&self.y16, &self.u16, &self.v16, f.index).map_err(|e| ExportError::Encode(format!("NVENC: {e}{hint}")))?
+            }
+            (true, None) => return Err(ExportError::Unsupported("NVENC HEVC Main 10 needs the HDR picture (EncoderFrame::hdr)".into())),
             (false, Some(_)) => return Err(ExportError::Unsupported("NVENC Main (8-bit) does not take HDR pictures".into())),
             // the GPU converts the RGBA picture itself (BT.709 limited range, the same codes as `rgba_to_yuv420_8`)
             (false, None) if self.enc.takes_rgba() => self.enc.encode_rgba(f.rgba, f.index).map_err(|e| ExportError::Encode(format!("NVENC: {e}{hint}")))?,
@@ -201,7 +219,7 @@ fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -
         cbr: s.bitrate_mode == BitrateMode::Cbr,
         keyint: s.keyframe_distance.filter(|k| *k > 0).unwrap_or_else(|| (f64::from(fps.0) / f64::from(fps.1) * 2.0).round().max(1.0) as u32),
         profile: match (av1, hevc, s.h264_profile) {
-            (true, _, _) if hdr => Profile::Av1Main10,
+            (true, _, _) if hdr || s.av1_pixel_format == filmcraft_export::Av1PixelFormat::Yuv420p10 => Profile::Av1Main10,
             (true, _, _) => Profile::Av1Main,
             (false, true, _) if hdr => Profile::HevcMain10,
             (false, true, _) => Profile::HevcMain,
@@ -305,8 +323,7 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
         || s.bitrate_mode == BitrateMode::Crf
         || s.av1_full_range
         || !matches!(s.av1_pixel_format, filmcraft_export::Av1PixelFormat::Yuv420p8 | filmcraft_export::Av1PixelFormat::Yuv420p10)
-        || (s.av1_pixel_format == filmcraft_export::Av1PixelFormat::Yuv420p10 && !s.signal.is_hdr())
-    {
+     {
         return None;
     }
     let declined = |why: &str| {
@@ -343,6 +360,19 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn av1_nvenc_main10_sdr_uses_ten_bit_without_hdr_signaling() {
+        let s = ExportSettings {
+            format: Format::Av1,
+            av1_pixel_format: filmcraft_export::Av1PixelFormat::Yuv420p10,
+            signal: ColorSignal::default(),
+            ..Default::default()
+        };
+        let config = config(Format::Av1, 320, 240, FrameRate::FPS_24, &s).expect("SDR Main10 is valid");
+        assert_eq!(config.profile, Profile::Av1Main10, "Main10 is chosen by bit depth, not just the PQ/HLG transfer");
+        assert_eq!(nvenc_signal(&s.signal).transfer, 1, "BT.709 SDR transfer must not be mislabeled as PQ");
+    }
 
     #[test]
     fn off_and_unsupported_settings_never_open_the_driver() {
