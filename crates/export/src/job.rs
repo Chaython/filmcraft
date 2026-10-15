@@ -239,6 +239,9 @@ impl Exporter {
             return Err(ExportError::Unsupported(format!("{} is not a stepped export", settings.format.label())));
         }
         settings.validate()?;
+        if settings.format == Format::Av1 && settings.multiplexer == crate::settings::Multiplexer::Mkv {
+            mkv_out::preflight()?;
+        }
         let q = project.sequence(seq).ok_or(ExportError::NoSequence)?;
         // HDR sequences export HDR (H.264 / ProRes / DNxHR / APV, and H.265 where a registered encoder
         // writes Main 10) unless SDR is asked for; elsewhere H.265 is tone-mapped 8-bit SDR

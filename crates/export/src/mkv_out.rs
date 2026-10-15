@@ -61,7 +61,8 @@ fn ffmpeg() -> std::ffi::OsString {
     std::env::var_os("FILMCRAFT_FFMPEG").filter(|v| !v.is_empty()).unwrap_or_else(|| "ffmpeg".into())
 }
 
-pub(crate) fn begin(settings: &ExportSettings) -> Result<(PendingMkv, Out)> {
+/// Check the external muxer during exporter setup, before any frames are rendered.
+pub(crate) fn preflight() -> Result<()> {
     let tool = ffmpeg();
     let result = Command::new(&tool)
         .args(["-hide_banner", "-version"])
@@ -78,9 +79,47 @@ pub(crate) fn begin(settings: &ExportSettings) -> Result<(PendingMkv, Out)> {
     {
         return Err(ExportError::Unsupported("this FFmpeg build has no Matroska writer; install FFmpeg with the matroska muxer".into()));
     }
+    Ok(())
+}
+
+pub(crate) fn begin(settings: &ExportSettings) -> Result<(PendingMkv, Out)> {
     let dir = if settings.sink.is_some() { std::env::temp_dir() } else { target_dir(settings).to_path_buf() };
     let (path, file) = reserve(&dir, "mp4")?;
     Ok((PendingMkv { intermediate: path }, Out::File(BufWriter::new(file))))
+}
+
+/// Publish only a complete file. Windows cannot rename over an existing file,
+/// so keep the original in a backup until its replacement is successfully moved.
+/// If the replacement fails, restore the original; never delete it in advance.
+fn publish_complete_file(source: &Path, target: &Path) -> Result<()> {
+    match fs::rename(source, target) {
+        Ok(()) => Ok(()),
+        Err(_) if target.is_file() => {
+            let dir = target.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+            let (backup, reserved) = reserve(dir, "backup")?;
+            drop(reserved);
+            fs::remove_file(&backup).map_err(|e| ExportError::Io(format!("cannot reserve a backup for existing MKV: {e}")))?;
+            fs::rename(target, &backup).map_err(|e| ExportError::Io(format!("cannot preserve existing MKV before replacement: {e}")))?;
+            match fs::rename(source, target) {
+                Ok(()) => {
+                    // The new MKV is in place. A failed backup cleanup must not
+                    // falsely report the completed export as failed.
+                    let _ = fs::remove_file(&backup);
+                    Ok(())
+                }
+                Err(error) => {
+                    match fs::rename(&backup, target) {
+                        Ok(()) => Err(ExportError::Io(format!("cannot install new MKV; previous file restored: {error}"))),
+                        Err(restore) => Err(ExportError::Io(format!(
+                            "cannot install new MKV ({error}); restore failed ({restore}); old file is preserved at {}",
+                            backup.display()
+                        ))),
+                    }
+                }
+            }
+        }
+        Err(error) => Err(ExportError::Io(format!("cannot move completed MKV into place: {error}"))),
+    }
 }
 
 /// Finalize the intermediate, losslessly stream-copy its tracks, then deliver
@@ -115,17 +154,7 @@ pub(crate) fn finish(intermediate_writer: Out, settings: &ExportSettings, pendin
         crate::write_output(settings, &settings.path, data)?;
     } else {
         let target = Path::new(&settings.path);
-        // The complete new file exists before an older export can be replaced.
-        match fs::rename(&output_path, target) {
-            Ok(()) => {}
-            Err(_) if target.is_file() => {
-                // Windows rename cannot replace an existing file. Only remove the old
-                // destination after FFmpeg has completed the new MKV successfully.
-                fs::remove_file(target).map_err(|e| ExportError::Io(format!("cannot replace existing MKV: {e}")))?;
-                fs::rename(&output_path, target).map_err(|e| ExportError::Io(format!("cannot move completed MKV into place: {e}")))?;
-            }
-            Err(e) => return Err(ExportError::Io(format!("cannot move completed MKV into place: {e}"))),
-        }
+        publish_complete_file(&output_path, target)?;
     }
     drop(guard);
     // A completed queue job can remain in memory after reporting Done; release
