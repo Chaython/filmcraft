@@ -72,7 +72,7 @@ pub fn write_sequence_header(cfg: &SequenceConfig) -> Vec<u8> {
     w.write_bits(0, 12);
     // The same checked level is written in both this sequence header and MP4's av1C.
     let level = cfg.seq_level_idx;
-    w.write_bits(level, 5);
+    w.write_bits(u32::from(level), 5);
     if level > 7 {
         w.write_bit(false); // seq_tier = 0
     }
