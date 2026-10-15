@@ -107,15 +107,13 @@ fn publish_complete_file(source: &Path, target: &Path) -> Result<()> {
                     let _ = fs::remove_file(&backup);
                     Ok(())
                 }
-                Err(error) => {
-                    match fs::rename(&backup, target) {
-                        Ok(()) => Err(ExportError::Io(format!("cannot install new MKV; previous file restored: {error}"))),
-                        Err(restore) => Err(ExportError::Io(format!(
-                            "cannot install new MKV ({error}); restore failed ({restore}); old file is preserved at {}",
-                            backup.display()
-                        ))),
-                    }
-                }
+                Err(error) => match fs::rename(&backup, target) {
+                    Ok(()) => Err(ExportError::Io(format!("cannot install new MKV; previous file restored: {error}"))),
+                    Err(restore) => Err(ExportError::Io(format!(
+                        "cannot install new MKV ({error}); restore failed ({restore}); old file is preserved at {}",
+                        backup.display()
+                    ))),
+                },
             }
         }
         Err(error) => Err(ExportError::Io(format!("cannot move completed MKV into place: {error}"))),
