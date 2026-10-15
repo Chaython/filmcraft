@@ -953,6 +953,45 @@ fn av1_is_an_mp4_format_with_builtin_encoder() {
 }
 
 #[test]
+fn av1_mkv_muxer_preserves_video_and_aac_without_transcoding() {
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "MKV integration requires FFmpeg in Linux CI");
+        return;
+    }
+    let (p, seq, sources) = matte([0.15, 0.35, 0.7, 1.0], 160, 96, Some(-12.0));
+    let dir = Scratch::new("av1-mkv-export");
+    let path = dir.path("result.mkv");
+    let settings = ExportSettings {
+        format: Format::Av1,
+        multiplexer: Multiplexer::Mkv,
+        path: path.clone(),
+        include_audio: true,
+        range: Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(4))),
+        ..Default::default()
+    };
+    assert_eq!(settings.extension(), "mkv");
+    assert_eq!(settings.summary(160, 96, FrameRate::FPS_24, 48_000, Tick(TICKS_PER_SECOND)).format, "AV1 (Matroska)");
+    let report = export(&p, seq, &settings, &sources, &Progress::default()).expect("AV1 Matroska export");
+    assert_eq!(report.frames, 4);
+    let bytes = std::fs::read(&path).expect("written Matroska file");
+    assert!(bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]), "must be EBML/Matroska and not a renamed MP4");
+    assert_eq!(report.bytes, bytes.len() as u64);
+    let probe = ffprobe_json(&["-show_entries", "stream=codec_name,codec_type:format=format_name"], &path)
+        .expect("ffprobe AV1 Matroska file");
+    let streams = probe["streams"].as_array().expect("Matroska streams");
+    assert!(streams.iter().any(|stream| stream["codec_name"] == "av1" && stream["codec_type"] == "video"), "AV1 video missing: {probe}");
+    assert!(streams.iter().any(|stream| stream["codec_name"] == "aac" && stream["codec_type"] == "audio"), "AAC soundtrack missing: {probe}");
+    let result = std::process::Command::new(ffmpeg)
+        .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+        .arg(&path)
+        .args(["-map", "0", "-f", "null", "-"])
+        .output()
+        .expect("independent MKV decoder");
+    assert!(result.status.success(), "libdav1d/AAC decode failed: {}", String::from_utf8_lossy(&result.stderr));
+}
+
+#[test]
 fn av1_software_encoder_rejects_mismatched_size_and_hdr_input() {
     let s = ExportSettings { format: Format::Av1, bitrate_mode: BitrateMode::Crf, ..Default::default() };
     let mut encoder = av1_factory(Format::Av1, 128, 96, FrameRate::FPS_24, &s).unwrap().unwrap();
