@@ -56,7 +56,7 @@ cargo test -p filmcraft-platform --test av1_hardware intel_qsv_av1_real_gpu_acce
 Remove-Item Env:FILMCRAFT_TEST_INTEL_AV1
 ```
 
-NVIDIA NVENC (Main 8-bit and HDR10 PQ Main10) can be tested on an AV1-capable NVIDIA Windows GPU:
+NVIDIA NVENC (Main 8-bit, BT.709 SDR Main10 and HDR10 PQ Main10) can be tested on an AV1-capable NVIDIA Windows GPU:
 
 ```powershell
 $env:FILMCRAFT_TEST_NVENC_AV1 = "1"
@@ -64,15 +64,15 @@ cargo test -p filmcraft-platform --test av1_hardware nvidia_nvenc_main_and_main1
 Remove-Item Env:FILMCRAFT_TEST_NVENC_AV1
 ```
 
-These tests fail (rather than skip) when opted in but the GPU cannot encode; they require actual hardware frames, real AV1 sequence headers, MP4 packaging and successful independent libdav1d decoding of 16 complete frames. Enable the application integration separately with `FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS=1`. PQ/HLG Main10 still needs separate real GPU colorimetry/HDR validation.
+These tests fail (rather than skip) when opted in but the GPU cannot encode; they require real AV1 sequence headers, MP4 and MKV packaging, independent libdav1d decoding of 16 complete frames, identical decoded pixels from MP4 and MKV, and PQ HDR colorimetry checks. The SDR Main10 path converts RGBA8 straight to 10-bit BT.709 limited-range YUV without first quantizing to 8-bit YUV; it cannot restore source precision that was already lost. Enable the application integration separately with `FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS=1`. PQ/HLG Main10 still needs separate real GPU colorimetry/HDR validation.
 
 ## Matroska (.mkv) export
 
 FilmCraft's AV1 Export ▸ Multiplexer selector now offers **MP4, QuickTime, and Matroska (MKV)**. The MKV path accepts the AV1 hardware encoders (NVIDIA NVENC Main/Main10 and opt-in AMD AMF/Intel QSV) and FFmpeg/libaom software encoding. The experimental native Rust AV1 encoder is **not used for MKV**: independent libdav1d decoding rejected its output in an end-to-end test, so software MKV uses libaom for all supported bit depths and chroma formats until that incompatibility is fixed. AAC, FLAC, or PCM audio tracks are stream-copied with the video when present. No second encode takes place, so changing containers does **not** improve or reduce encoded image quality.
 
-For now, MKV export uses a disk-backed intermediate MP4 with the finalized encoder-provided `av1C`, then calls local **FFmpeg's Matroska muxer** (`-map 0 -c copy`). This is intentional: Matroska requires a real AV1CodecConfigurationRecord in `CodecPrivate` when Tracks are written, while some hardware encoders only expose the AV1 sequence header during/after encoding. The converter does not use a shell, writes to a unique temporary filename, cleans intermediates on failure/cancellation, and reports success only after writing a nonempty MKV. The final export path is not created during rendering.
+For now, MKV export uses a disk-backed intermediate MP4 with the finalized encoder-provided `av1C`, then calls local **FFmpeg's Matroska muxer** (`-map 0 -c copy`). This is intentional: Matroska requires a real AV1CodecConfigurationRecord in `CodecPrivate` when Tracks are written, while some hardware encoders only expose the AV1 sequence header during/after encoding. The converter does not use a shell, writes to a unique temporary filename, cleans intermediates on failure/cancellation, and reports success only after writing a nonempty MKV. The final export path is not created during rendering. Replacing an existing MKV uses a temporary backup on platforms without atomic replacement support, and restores it if final installation fails.
 
-FFmpeg must be on PATH or specified by `FILMCRAFT_FFMPEG`. A missing executable returns an actionable error before rendering starts. The existing native Matroska muxer may eventually replace the intermediate remux once it supports late-bound AV1 codec configuration. This integration deliberately enables MKV only for AV1; switching another format to MKV is rejected rather than silently writing MP4 under an MKV extension.
+FFmpeg must be on PATH or specified by `FILMCRAFT_FFMPEG`. FFmpeg availability and its Matroska writer are checked during export setup **before rendering any frames**. A missing executable or muxer fails immediately with an actionable error. The existing native Matroska muxer may eventually replace the intermediate remux once it supports late-bound AV1 codec configuration. This integration deliberately enables MKV only for AV1; switching another format to MKV is rejected rather than silently writing MP4 under an MKV extension.
 
 The integration test exports real AV1 + AAC to MKV, verifies its EBML magic bytes, probes both streams, and decodes the result with independent FFmpeg/libdav1d. Hardware encoder acceptance remains a separate real-GPU requirement.
 
