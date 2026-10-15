@@ -201,6 +201,11 @@ pub(crate) fn av1_software_sdr(s: &ExportSettings) -> bool {
         && (s.hardware_encoding == crate::HardwareEncoding::Off || s.bitrate_mode == crate::BitrateMode::Crf)
 }
 
+/// The requested 8-bit AV1 profile must be SDR, even on an HDR Main10 GPU.
+pub(crate) fn av1_requires_sdr(s: &ExportSettings) -> bool {
+    s.video_format() == Format::Av1 && (s.av1_pixel_format.bit_depth() < 10 || av1_software_sdr(s))
+}
+
 pub(crate) fn hdr_output(working_hdr: bool, sdr: bool, format: Format, hdr_available: impl Fn(Format) -> bool) -> bool {
     working_hdr
         && !sdr
@@ -235,7 +240,7 @@ impl Exporter {
         // HDR sequences export HDR (H.264 / ProRes / DNxHR / APV, and H.265 where a registered encoder
         // writes Main 10) unless SDR is asked for; elsewhere H.265 is tone-mapped 8-bit SDR
         let pipe = q.settings.color;
-        let hdr_out = hdr_output(pipe.working.is_hdr(), settings.sdr || av1_software_sdr(settings), settings.video_format(), |format| {
+        let hdr_out = hdr_output(pipe.working.is_hdr(), settings.sdr || av1_requires_sdr(settings), settings.video_format(), |format| {
             crate::hdr_available(format) || (format == Format::Av1 && settings.av1_pixel_format.bit_depth() >= 10)
         });
         let mut settings = settings.clone();
