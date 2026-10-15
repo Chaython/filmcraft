@@ -552,6 +552,10 @@ fn settings_column(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         {
             audio_section(ui, &mut reg, s, &t, seq_sr);
         }
+        if s.format != Format::Av1 && s.multiplexer == Multiplexer::Mkv {
+            // A saved AV1 MKV choice must not break export when another codec is selected.
+            s.multiplexer = Multiplexer::Mp4;
+        }
         if s.format.is_h26x() && section(ui, &mut reg, &mut ex.open_sections, "multiplexer", tl!("Multiplexer"), &t) {
             row(ui, &t, tl!("Multiplexer"), |ui| {
                 let cur = match s.multiplexer {

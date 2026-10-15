@@ -928,6 +928,12 @@ fn av1_is_an_mp4_format_with_builtin_encoder() {
     assert_eq!((a.audio_codec(), a.extension()), (AudioCodec::Aac, "mp4"));
     let mov = ExportSettings { multiplexer: Multiplexer::Mov, ..a.clone() };
     assert_eq!((mov.audio_codec(), mov.extension()), (AudioCodec::Aac, "mov"));
+    let mkv = ExportSettings { multiplexer: Multiplexer::Mkv, ..a.clone() };
+    assert_eq!((mkv.audio_codec(), mkv.extension()), (AudioCodec::Aac, "mkv"));
+    assert_eq!(mkv.summary(1920, 1088, FrameRate::FPS_25, 48_000, Tick(10 * TICKS_PER_SECOND)).format, "AV1 (Matroska)");
+    let bad = ExportSettings { format: Format::H264, ..mkv };
+    assert!(bad.validate().unwrap_err().to_string().contains("AV1 only"));
+
     let b = a.estimate_bytes(1920, 1088, FrameRate::FPS_25, 48_000, Tick(10 * TICKS_PER_SECOND));
     assert!((b as f64 - 25.4e6).abs() < 0.2e6, "{b}");
     let summary = a.summary(1920, 1088, FrameRate::FPS_25, 48_000, Tick(10 * TICKS_PER_SECOND));

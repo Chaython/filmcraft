@@ -70,6 +70,11 @@ pub(crate) fn begin(settings: &ExportSettings) -> Result<(PendingMkv, Out)> {
     if !result.status.success() {
         return Err(ExportError::Unsupported("FFmpeg could not start: MKV export needs its Matroska muxer".into()));
     }
+    let muxers = Command::new(&tool).args(["-hide_banner", "-muxers"]).output()
+        .map_err(|e| ExportError::Unsupported(format!("cannot check FFmpeg Matroska muxer: {e}")))?;
+    if !muxers.status.success() || !String::from_utf8_lossy(&muxers.stdout).lines().any(|line| line.trim_start().starts_with("E") && line.contains("matroska")) {
+        return Err(ExportError::Unsupported("this FFmpeg build has no Matroska writer; install FFmpeg with the matroska muxer".into()));
+    }
     let dir = if settings.sink.is_some() { std::env::temp_dir() } else { target_dir(settings).to_path_buf() };
     let (path, file) = reserve(&dir, "mp4")?;
     Ok((PendingMkv { intermediate: path }, Out::File(BufWriter::new(file))))
@@ -108,10 +113,16 @@ pub(crate) fn finish(intermediate_writer: Out, settings: &ExportSettings, pendin
     } else {
         let target = Path::new(&settings.path);
         // The complete new file exists before an older export can be replaced.
-        if target.exists() {
-            fs::remove_file(target).map_err(|e| ExportError::Io(format!("cannot replace existing MKV: {e}")))?;
+        match fs::rename(&output_path, target) {
+            Ok(()) => {}
+            Err(_) if target.is_file() => {
+                // Windows rename cannot replace an existing file. Only remove the old
+                // destination after FFmpeg has completed the new MKV successfully.
+                fs::remove_file(target).map_err(|e| ExportError::Io(format!("cannot replace existing MKV: {e}")))?;
+                fs::rename(&output_path, target).map_err(|e| ExportError::Io(format!("cannot move completed MKV into place: {e}")))?;
+            }
+            Err(e) => return Err(ExportError::Io(format!("cannot move completed MKV into place: {e}"))),
         }
-        fs::rename(&output_path, target).map_err(|e| ExportError::Io(format!("cannot move completed MKV into place: {e}")))?;
     }
     drop(guard);
     Ok(len)
