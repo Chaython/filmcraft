@@ -42,6 +42,22 @@ The export panel now offers nine pixel formats: **8/10/12-bit × 4:2:0/4:2:2/4:4
 
 FilmCraft does not silently label an 8-bit encode HDR or claim unsupported bit depths. The new external encoder also rejects malformed output or mismatched color information rather than writing an invalid AV1 sample entry.
 
+### AMD and Intel hardware acceptance (Windows GPUs)
+
+The AMF/QSV paths are intentionally **not marked validated** by hosted Actions: those machines typically have no corresponding video-encoding GPU. Real 8-bit Main 4:2:0 hardware acceptance tests are included at `crates/platform/tests/av1_hardware.rs`. On a host with an AMD AV1 encoder or an Intel AV1-capable GPU, install FFmpeg with libdav1d and run:
+
+```powershell
+$env:FILMCRAFT_TEST_AMD_AV1 = "1"    # AMD host only
+cargo test -p filmcraft-platform --test av1_hardware amd_amf_av1_real_gpu_acceptance -- --nocapture
+Remove-Item Env:FILMCRAFT_TEST_AMD_AV1
+
+$env:FILMCRAFT_TEST_INTEL_AV1 = "1"  # Intel host only
+cargo test -p filmcraft-platform --test av1_hardware intel_qsv_av1_real_gpu_acceptance -- --nocapture
+Remove-Item Env:FILMCRAFT_TEST_INTEL_AV1
+```
+
+These tests fail (rather than skip) when opted in but the GPU cannot encode; they require actual hardware frames, real AV1 sequence headers, MP4 packaging and successful independent libdav1d decoding of 16 complete frames. Enable the application integration separately with `FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS=1`. PQ/HLG Main10 still needs separate real GPU colorimetry/HDR validation.
+
 ## Safety gates
 
 1. `cargo fmt --all -- --check`
