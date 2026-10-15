@@ -323,7 +323,7 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
         || s.bitrate_mode == BitrateMode::Crf
         || s.av1_full_range
         || !matches!(s.av1_pixel_format, filmcraft_export::Av1PixelFormat::Yuv420p8 | filmcraft_export::Av1PixelFormat::Yuv420p10)
-     {
+    {
         return None;
     }
     let declined = |why: &str| {
