@@ -1033,6 +1033,56 @@ fn av1_mkv_high_bitdepth_444_roundtrip() {
 }
 
 #[test]
+fn av1_mkv_pq_and_hlg_colour_metadata_survives_remux() {
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "AV1 HDR Matroska CI requires FFmpeg");
+        return;
+    }
+    let info = [
+        (filmcraft_color::WorkingSpace::Rec2100Pq, Av1PixelFormat::Yuv420p10, false, "smpte2084", "tv"),
+        (filmcraft_color::WorkingSpace::Rec2100Hlg, Av1PixelFormat::Yuv444p12, true, "arib-std-b67", "pc"),
+    ];
+    for (space, pixel_format, full_range, transfer, range) in info {
+        let (mut project, seq, sources) = matte([0.3, 0.5, 0.8, 1.0], 160, 96, None);
+        let project_ref = Arc::get_mut(&mut project).expect("unique test project");
+        project_ref.sequence_mut(seq).expect("HDR sequence").settings.color.working = space;
+        let dir = Scratch::new(&format!("av1-mkv-hdr-{}", space.id()));
+        let path = dir.path("hdr.mkv");
+        let settings = ExportSettings {
+            format: Format::Av1,
+            multiplexer: Multiplexer::Mkv,
+            av1_pixel_format: pixel_format,
+            av1_full_range: full_range,
+            bitrate_mode: BitrateMode::Crf,
+            hardware_encoding: HardwareEncoding::Off,
+            crf: 35.0,
+            include_audio: false,
+            path: path.clone(),
+            range: Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(2))),
+            ..Default::default()
+        };
+        export(&project, seq, &settings, &sources, &Progress::default()).expect("HDR AV1 MKV export");
+        let fields = ["-show_entries", "stream=codec_name,pix_fmt,color_space,color_primaries,color_transfer,color_range"];
+        let probe = ffprobe_json(&fields, &path).expect("probe HDR Matroska");
+        let video = &probe["streams"][0];
+        assert_eq!(video["codec_name"], "av1", "{space:?}: {probe}");
+        assert_eq!(video["color_space"], "bt2020nc", "{space:?}: Matroska lost BT.2020 matrix: {probe}");
+        assert_eq!(video["color_primaries"], "bt2020", "{space:?}: Matroska lost BT.2020 primaries: {probe}");
+        assert_eq!(video["color_transfer"], transfer, "{space:?}: Matroska lost PQ/HLG: {probe}");
+        assert_eq!(video["color_range"], range, "{space:?}: Matroska lost the requested range: {probe}");
+        assert_eq!(video["pix_fmt"], pixel_format.ffmpeg_name(), "{space:?}: Matroska changed bit depth or chroma: {probe}");
+        let decoded = std::process::Command::new(&ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+            .arg(&path)
+            .args(["-f", "null", "-"])
+            .output()
+            .expect("independent HDR MKV decoder");
+        assert!(decoded.status.success(), "{space:?}: independent HDR MKV decoding failed: {}", String::from_utf8_lossy(&decoded.stderr));
+    }
+}
+
+#[test]
 fn av1_software_encoder_rejects_mismatched_size_and_hdr_input() {
     let s = ExportSettings { format: Format::Av1, bitrate_mode: BitrateMode::Crf, ..Default::default() };
     let mut encoder = av1_factory(Format::Av1, 128, 96, FrameRate::FPS_24, &s).unwrap().unwrap();
