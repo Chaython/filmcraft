@@ -961,10 +961,10 @@ fn av1_software_encoder_rejects_mismatched_size_and_hdr_input() {
     };
     assert_eq!(av1c.seq_level_idx_0, 0, "av1C must match the encoder's declared AV1 level");
     let wrong_size = EncoderFrame { width: 64, height: 96, rgba: &[], hdr: None, index: 0 };
-    let err = encoder.encode(&wrong_size).unwrap_err();
+    let err = encoder.encode(&wrong_size).err().expect("size mismatch must fail");
     assert!(err.to_string().contains("does not match"), "{err}");
     let hdr = EncoderFrame { width: 128, height: 96, rgba: &[], hdr: Some(&[0.0]), index: 0 };
-    let err = encoder.encode(&hdr).unwrap_err();
+    let err = encoder.encode(&hdr).err().expect("HDR frame must fail");
     assert!(err.to_string().contains("SDR"), "{err}");
 }
 
