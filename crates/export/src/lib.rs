@@ -76,11 +76,8 @@ pub enum Av1PixelFormat {
     Yuv444p12,
 }
 impl Av1PixelFormat {
-    pub const ALL: [Self; 9] = [
-        Self::Yuv420p8, Self::Yuv420p10, Self::Yuv420p12,
-        Self::Yuv422p8, Self::Yuv422p10, Self::Yuv422p12,
-        Self::Yuv444p8, Self::Yuv444p10, Self::Yuv444p12,
-    ];
+    pub const ALL: [Self; 9] =
+        [Self::Yuv420p8, Self::Yuv420p10, Self::Yuv420p12, Self::Yuv422p8, Self::Yuv422p10, Self::Yuv422p12, Self::Yuv444p8, Self::Yuv444p10, Self::Yuv444p12];
     pub const fn bit_depth(self) -> u8 {
         match self {
             Self::Yuv420p8 | Self::Yuv422p8 | Self::Yuv444p8 => 8,

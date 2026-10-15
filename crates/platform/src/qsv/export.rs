@@ -197,11 +197,15 @@ pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettin
     let codec = match format {
         Format::H264 if s.hardware_encoding == HardwareEncoding::Auto => Codec::H264,
         Format::Hevc => Codec::Hevc,
-        Format::Av1 if s.hardware_encoding == HardwareEncoding::Auto
-            && s.bitrate_mode != BitrateMode::Crf
-            && !s.av1_full_range
-            && matches!(s.av1_pixel_format, filmcraft_export::Av1PixelFormat::Yuv420p8 | filmcraft_export::Av1PixelFormat::Yuv420p10)
-            && (s.av1_pixel_format != filmcraft_export::Av1PixelFormat::Yuv420p10 || s.signal.is_hdr()) => Codec::Av1,
+        Format::Av1
+            if s.hardware_encoding == HardwareEncoding::Auto
+                && s.bitrate_mode != BitrateMode::Crf
+                && !s.av1_full_range
+                && matches!(s.av1_pixel_format, filmcraft_export::Av1PixelFormat::Yuv420p8 | filmcraft_export::Av1PixelFormat::Yuv420p10)
+                && (s.av1_pixel_format != filmcraft_export::Av1PixelFormat::Yuv420p10 || s.signal.is_hdr()) =>
+        {
+            Codec::Av1
+        }
         _ => return None,
     };
 

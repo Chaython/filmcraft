@@ -8,10 +8,10 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::{Av1PixelFormat, BitrateMode, ColorSignal, EncodedPacket, EncoderFrame, ExportError, ExportSettings, Format, Result, VideoEncoder};
 use filmcraft_av1::SequenceHeader;
 use filmcraft_isobmff::{Av1Config, ColorInfo, SampleEntry};
 use filmcraft_time::FrameRate;
-use crate::{Av1PixelFormat, BitrateMode, ColorSignal, EncodedPacket, EncoderFrame, ExportError, ExportSettings, Format, Result, VideoEncoder};
 
 static FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const MAX_IVF_BYTES: u64 = 1024 * 1024 * 1024;
@@ -53,9 +53,9 @@ fn quantize(value: f32, depth: u8, chroma: bool, full: bool) -> u16 {
 
 fn matrix(signal: ColorSignal) -> Result<(f32, f32)> {
     match signal.matrix {
-        1 => Ok((0.2126, 0.0722)), // BT.709
+        1 => Ok((0.2126, 0.0722)),     // BT.709
         5 | 6 => Ok((0.2990, 0.1140)), // BT.470BG / SMPTE 170M
-        9 => Ok((0.2627, 0.0593)), // BT.2020 non-constant luminance
+        9 => Ok((0.2627, 0.0593)),     // BT.2020 non-constant luminance
         _ => Err(ExportError::Unsupported(format!("AV1 external encoder needs a supported YCbCr matrix (709/601/2020 nonconstant), got {}", signal.matrix))),
     }
 }
@@ -127,7 +127,9 @@ fn write_planar(frame: &EncoderFrame<'_>, format: Av1PixelFormat, signal: ColorS
             raw.write_all(&bytes).map_err(|e| ExportError::Io(e.to_string()))?;
         } else {
             let mut bytes = Vec::with_capacity(plane.len() * 2);
-            for &value in plane { bytes.extend_from_slice(&value.to_le_bytes()); }
+            for &value in plane {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
             raw.write_all(&bytes).map_err(|e| ExportError::Io(e.to_string()))?;
         }
     }
@@ -138,23 +140,34 @@ fn write_planar(frame: &EncoderFrame<'_>, format: Av1PixelFormat, signal: ColorS
 fn sequence_header(data: &[u8]) -> Option<(&[u8], &[u8])> {
     let mut pos = 0usize;
     while let Some(&header) = data.get(pos) {
-        if header & 0x81 != 0 { return None; }
+        if header & 0x81 != 0 {
+            return None;
+        }
         let start = pos;
         pos += 1;
-        if header & 4 != 0 { pos = pos.checked_add(1)?; data.get(pos - 1)?; }
-        if header & 2 == 0 { return None; }
+        if header & 4 != 0 {
+            pos = pos.checked_add(1)?;
+            data.get(pos - 1)?;
+        }
+        if header & 2 == 0 {
+            return None;
+        }
         let mut size = 0usize;
         let mut shift = 0;
         for _ in 0..8 {
             let b = *data.get(pos)?;
             pos += 1;
             size = size.checked_add(usize::from(b & 0x7f).checked_shl(shift)?)?;
-            if b & 0x80 == 0 { break; }
+            if b & 0x80 == 0 {
+                break;
+            }
             shift += 7;
         }
         let end = pos.checked_add(size)?;
         let payload = data.get(pos..end)?;
-        if (header >> 3) & 15 == 1 { return Some((data.get(start..end)?, payload)); }
+        if (header >> 3) & 15 == 1 {
+            return Some((data.get(start..end)?, payload));
+        }
         pos = end;
     }
     None
@@ -169,7 +182,8 @@ fn av1_config(packet: &[u8], requested: Av1PixelFormat, signal: ColorSignal, ful
         return Err(ExportError::Encode(format!("libaom emitted a different AV1 pixel format than requested {}", requested.label())));
     }
     if (color.color_primaries, color.transfer_characteristics, color.matrix_coefficients, color.color_range)
-        != (signal.primaries, signal.transfer, signal.matrix, full_range) {
+        != (signal.primaries, signal.transfer, signal.matrix, full_range)
+    {
         return Err(ExportError::Encode("libaom AV1 color metadata differs from requested primaries/transfer/matrix/range".into()));
     }
     Ok(Av1Config {
@@ -224,65 +238,136 @@ impl FfmpegAv1Encoder {
         }
         matrix(settings.signal)?;
         let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
-        let status = Command::new(&ffmpeg).args(["-hide_banner", "-version"]).output().map_err(|e| ExportError::Unsupported(format!("advanced AV1 export needs installed FFmpeg/libaom (set FILMCRAFT_FFMPEG): {e}")))?;
-        if !status.status.success() { return Err(ExportError::Unsupported("FFmpeg did not start successfully".into())); }
+        let status = Command::new(&ffmpeg)
+            .args(["-hide_banner", "-version"])
+            .output()
+            .map_err(|e| ExportError::Unsupported(format!("advanced AV1 export needs installed FFmpeg/libaom (set FILMCRAFT_FFMPEG): {e}")))?;
+        if !status.status.success() {
+            return Err(ExportError::Unsupported("FFmpeg did not start successfully".into()));
+        }
         let (raw, raw_path, ivf_path) = unique_temp_file()?;
         Ok(Self {
-            ffmpeg, raw: Some(raw), raw_path, ivf_path,
-            format: settings.av1_pixel_format, signal: settings.signal, full_range: settings.av1_full_range,
-            width: w, height: h, rate, bitrate_mode: settings.bitrate_mode,
-            bitrate_kbps: settings.bitrate_kbps.max(100), crf: settings.crf, keyint: settings.keyframe_distance.unwrap_or(48).max(1),
-            frames: 0, config: None, finished: false,
+            ffmpeg,
+            raw: Some(raw),
+            raw_path,
+            ivf_path,
+            format: settings.av1_pixel_format,
+            signal: settings.signal,
+            full_range: settings.av1_full_range,
+            width: w,
+            height: h,
+            rate,
+            bitrate_mode: settings.bitrate_mode,
+            bitrate_kbps: settings.bitrate_kbps.max(100),
+            crf: settings.crf,
+            keyint: settings.keyframe_distance.unwrap_or(48).max(1),
+            frames: 0,
+            config: None,
+            finished: false,
         })
     }
     fn encode_ivf(&mut self) -> Result<Vec<EncodedPacket>> {
-        if self.frames == 0 { return Err(ExportError::Unsupported("cannot encode empty AV1 sequence".into())); }
+        if self.frames == 0 {
+            return Err(ExportError::Unsupported("cannot encode empty AV1 sequence".into()));
+        }
         self.raw.take();
         let frame_rate = format!("{}/{}", self.rate.num, self.rate.den);
         let size = format!("{}x{}", self.width, self.height);
         let mut cmd = Command::new(&self.ffmpeg);
-        cmd.args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format", self.format.ffmpeg_name(), "-video_size", &size, "-framerate", &frame_rate, "-i"])
-            .arg(&self.raw_path)
-            .args(["-an", "-c:v", "libaom-av1", "-pix_fmt", self.format.ffmpeg_name(), "-cpu-used", "6", "-lag-in-frames", "0", "-auto-alt-ref", "0", "-color_primaries"])
-            .arg(self.signal.primaries.to_string())
-            .arg("-color_trc").arg(self.signal.transfer.to_string())
-            .arg("-colorspace").arg(self.signal.matrix.to_string())
-            .arg("-color_range").arg(if self.full_range { "pc" } else { "tv" })
-            .arg("-g").arg(self.keyint.to_string());
+        cmd.args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            self.format.ffmpeg_name(),
+            "-video_size",
+            &size,
+            "-framerate",
+            &frame_rate,
+            "-i",
+        ])
+        .arg(&self.raw_path)
+        .args([
+            "-an",
+            "-c:v",
+            "libaom-av1",
+            "-pix_fmt",
+            self.format.ffmpeg_name(),
+            "-cpu-used",
+            "6",
+            "-lag-in-frames",
+            "0",
+            "-auto-alt-ref",
+            "0",
+            "-color_primaries",
+        ])
+        .arg(self.signal.primaries.to_string())
+        .arg("-color_trc")
+        .arg(self.signal.transfer.to_string())
+        .arg("-colorspace")
+        .arg(self.signal.matrix.to_string())
+        .arg("-color_range")
+        .arg(if self.full_range { "pc" } else { "tv" })
+        .arg("-g")
+        .arg(self.keyint.to_string());
         match self.bitrate_mode {
-            BitrateMode::Crf => { cmd.args(["-b:v", "0", "-crf"]).arg(format!("{}", self.crf.clamp(0.0, 63.0).round())); }
-            _ => { cmd.arg("-b:v").arg(format!("{}k", self.bitrate_kbps)); }
+            BitrateMode::Crf => {
+                cmd.args(["-b:v", "0", "-crf"]).arg(format!("{}", self.crf.clamp(0.0, 63.0).round()));
+            }
+            _ => {
+                cmd.arg("-b:v").arg(format!("{}k", self.bitrate_kbps));
+            }
         }
-        let result = cmd.args(["-f", "ivf"]).arg(&self.ivf_path).output()
-            .map_err(|e| ExportError::Encode(format!("cannot launch FFmpeg/libaom: {e}")))?;
+        let result = cmd.args(["-f", "ivf"]).arg(&self.ivf_path).output().map_err(|e| ExportError::Encode(format!("cannot launch FFmpeg/libaom: {e}")))?;
         if !result.status.success() {
-            return Err(ExportError::Encode(format!("FFmpeg/libaom AV1 export failed (format {}): {}", self.format.label(), String::from_utf8_lossy(&result.stderr).chars().take(2000).collect::<String>())));
+            return Err(ExportError::Encode(format!(
+                "FFmpeg/libaom AV1 export failed (format {}): {}",
+                self.format.label(),
+                String::from_utf8_lossy(&result.stderr).chars().take(2000).collect::<String>()
+            )));
         }
         let mut file = File::open(&self.ivf_path).map_err(|e| ExportError::Io(e.to_string()))?;
         let len = file.metadata().map_err(|e| ExportError::Io(e.to_string()))?.len();
-        if len > MAX_IVF_BYTES { return Err(ExportError::Unsupported("AV1 output exceeds temporary IVF memory safety cap; use shorter exports".into())); }
+        if len > MAX_IVF_BYTES {
+            return Err(ExportError::Unsupported("AV1 output exceeds temporary IVF memory safety cap; use shorter exports".into()));
+        }
         let mut header = [0u8; 32];
         file.read_exact(&mut header).map_err(|e| ExportError::Encode(format!("truncated AV1 IVF header: {e}")))?;
         if &header[..4] != b"DKIF" || &header[8..12] != b"AV01" {
             return Err(ExportError::Encode("libaom did not produce an AV1 IVF stream".into()));
         }
         let (ew, eh) = (u16::from_le_bytes([header[12], header[13]]) as u32, u16::from_le_bytes([header[14], header[15]]) as u32);
-        if (ew, eh) != (self.width, self.height) { return Err(ExportError::Encode("libaom returned mismatched AV1 frame dimensions".into())); }
+        if (ew, eh) != (self.width, self.height) {
+            return Err(ExportError::Encode("libaom returned mismatched AV1 frame dimensions".into()));
+        }
         let mut out = Vec::new();
         let mut accounted = 32u64;
         while accounted < len {
             let mut fh = [0u8; 12];
             file.read_exact(&mut fh).map_err(|e| ExportError::Encode(format!("truncated AV1 IVF frame header: {e}")))?;
             let size = u32::from_le_bytes([fh[0], fh[1], fh[2], fh[3]]) as usize;
-            if size == 0 || size > MAX_FRAME_BYTES { return Err(ExportError::Unsupported("AV1 encoded packet outside accepted size bounds".into())); }
+            if size == 0 || size > MAX_FRAME_BYTES {
+                return Err(ExportError::Unsupported("AV1 encoded packet outside accepted size bounds".into()));
+            }
             accounted = accounted.saturating_add(12 + size as u64);
-            if accounted > len { return Err(ExportError::Encode("AV1 IVF frame size exceeds file length".into())); }
+            if accounted > len {
+                return Err(ExportError::Encode("AV1 IVF frame size exceeds file length".into()));
+            }
             let mut data = vec![0u8; size];
             file.read_exact(&mut data).map_err(|e| ExportError::Encode(format!("truncated AV1 IVF packet: {e}")))?;
             if self.config.is_none() {
                 self.config = Some(av1_config(&data, self.format, self.signal, self.full_range)?);
             }
-            out.push(EncodedPacket { key: filmcraft_av1::is_key_frame_unit(&data), data, duration: u32::try_from(self.rate.den).map_err(|_| ExportError::Unsupported("AV1 timescale overflow".into()))?, composition_offset: 0 });
+            out.push(EncodedPacket {
+                key: filmcraft_av1::is_key_frame_unit(&data),
+                data,
+                duration: u32::try_from(self.rate.den).map_err(|_| ExportError::Unsupported("AV1 timescale overflow".into()))?,
+                composition_offset: 0,
+            });
         }
         if out.len() as u64 != self.frames {
             return Err(ExportError::Encode(format!("libaom emitted {} AV1 samples for {} input frames; refuse incorrect timestamps", out.len(), self.frames)));
@@ -294,7 +379,13 @@ impl VideoEncoder for FfmpegAv1Encoder {
     fn sample_entry(&self) -> SampleEntry {
         let (sx, sy) = self.format.chroma_shift();
         let initial = self.config.clone().unwrap_or(Av1Config {
-            seq_profile: if sx == 1 && sy == 1 { 0 } else if sx == 0 && self.format.bit_depth() < 12 { 1 } else { 2 },
+            seq_profile: if sx == 1 && sy == 1 {
+                0
+            } else if sx == 0 && self.format.bit_depth() < 12 {
+                1
+            } else {
+                2
+            },
             seq_level_idx_0: 0,
             seq_tier_0: false,
             high_bitdepth: self.format.bit_depth() > 8,
@@ -310,16 +401,25 @@ impl VideoEncoder for FfmpegAv1Encoder {
         let mut entry = SampleEntry::av1(initial, w, h);
         self.signal.apply_to(&mut entry, false);
         if let Some(video) = entry.video.as_mut() {
-            video.color = Some(ColorInfo::Nclx { primaries: self.signal.primaries as u16, transfer: self.signal.transfer as u16, matrix: self.signal.matrix as u16, full_range: self.full_range });
+            video.color = Some(ColorInfo::Nclx {
+                primaries: self.signal.primaries as u16,
+                transfer: self.signal.transfer as u16,
+                matrix: self.signal.matrix as u16,
+                full_range: self.full_range,
+            });
         }
         entry
     }
     fn final_sample_entry(&self) -> Result<Option<SampleEntry>> {
         self.config.as_ref().ok_or_else(|| ExportError::Encode("libaom produced no validated AV1 sequence header".into())).map(|_| Some(self.sample_entry()))
     }
-    fn timescale(&self) -> u32 { u32::try_from(self.rate.num).unwrap_or(1) }
+    fn timescale(&self) -> u32 {
+        u32::try_from(self.rate.num).unwrap_or(1)
+    }
     fn encode(&mut self, frame: &EncoderFrame<'_>) -> Result<Vec<EncodedPacket>> {
-        if self.finished { return Err(ExportError::Encode("AV1 encoder has already finished".into())); }
+        if self.finished {
+            return Err(ExportError::Encode("AV1 encoder has already finished".into()));
+        }
         if frame.width != self.width || frame.height != self.height {
             return Err(ExportError::Unsupported("AV1 frame dimensions changed during export".into()));
         }
@@ -329,13 +429,17 @@ impl VideoEncoder for FfmpegAv1Encoder {
         Ok(Vec::new())
     }
     fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
-        if self.finished { return Ok(Vec::new()); }
+        if self.finished {
+            return Ok(Vec::new());
+        }
         self.finished = true;
         self.encode_ivf()
     }
 }
 pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, settings: &ExportSettings) -> Option<Result<Box<dyn VideoEncoder>>> {
-    if format != Format::Av1 { return None; }
+    if format != Format::Av1 {
+        return None;
+    }
     Some(FfmpegAv1Encoder::new(w, h, rate, settings).map(|v| Box::new(v) as Box<dyn VideoEncoder>))
 }
 
