@@ -32,7 +32,8 @@ type StartupFn = unsafe extern "system" fn(u32, u32) -> HRESULT;
 pub(crate) type CreateFn = unsafe extern "system" fn(*mut *mut c_void) -> HRESULT;
 pub(crate) type CreateBufferFn = unsafe extern "system" fn(u32, *mut *mut c_void) -> HRESULT;
 type CreateManagerFn = unsafe extern "system" fn(*mut u32, *mut *mut c_void) -> HRESULT;
-pub(crate) type EnumFn = unsafe extern "system" fn(GUID, u32, *const MFT_REGISTER_TYPE_INFO, *const MFT_REGISTER_TYPE_INFO, *mut *mut *mut c_void, *mut u32) -> HRESULT;
+pub(crate) type EnumFn =
+    unsafe extern "system" fn(GUID, u32, *const MFT_REGISTER_TYPE_INFO, *const MFT_REGISTER_TYPE_INFO, *mut *mut *mut c_void, *mut u32) -> HRESULT;
 
 /// The few `mfplat.dll` entry points the backend uses, resolved at run time.
 pub struct MfApi {
