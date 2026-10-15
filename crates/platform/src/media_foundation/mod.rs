@@ -29,7 +29,7 @@
 mod av1_container;
 mod av1_run;
 #[allow(unsafe_code)]
-mod gpu;
+pub(crate) mod gpu;
 #[allow(unsafe_code)]
 pub(crate) mod mft;
 mod pending;
