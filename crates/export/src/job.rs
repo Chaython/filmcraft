@@ -70,8 +70,8 @@ use filmcraft_time::FrameRate;
 use rayon::prelude::*;
 
 use crate::audio_out::AudioOut;
-use crate::mxf_out::{MxfMux, MxfSetup};
 use crate::mkv_out::{self, PendingMkv};
+use crate::mxf_out::{MxfMux, MxfSetup};
 use crate::pipeline::Pipeline;
 use crate::settings::{AudioCodec, BitrateMode};
 use crate::{
@@ -534,11 +534,7 @@ impl Exporter {
                     .ok_or_else(|| ExportError::Encode("internal: the container writer was not created".into()))?
                     .finish()
                     .map_err(|e| ExportError::Io(e.to_string()))?;
-                let bytes = if let Some(mkv) = self.mkv.as_ref() {
-                    mkv_out::finish(w, &self.settings, mkv)?
-                } else {
-                    w.finish(&self.settings)?
-                };
+                let bytes = if let Some(mkv) = self.mkv.as_ref() { mkv_out::finish(w, &self.settings, mkv)? } else { w.finish(&self.settings)? };
                 (bytes, Vec::new())
             }
         };

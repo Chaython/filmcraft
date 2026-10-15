@@ -561,7 +561,11 @@ fn settings_column(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                 };
                 let names: &[&str] = if s.format == Format::Av1 { &["MP4", "QuickTime", "Matroska (MKV)"] } else { &["MP4", "QuickTime"] };
                 if let Some(i) = combo(ui, &mut reg, "export.multiplexer", cur, &opts(names), 170.0) {
-                    s.multiplexer = match i { 0 => Multiplexer::Mp4, 1 => Multiplexer::Mov, _ => Multiplexer::Mkv };
+                    s.multiplexer = match i {
+                        0 => Multiplexer::Mp4,
+                        1 => Multiplexer::Mov,
+                        _ => Multiplexer::Mkv,
+                    };
                 }
             });
         }
