@@ -117,3 +117,31 @@ fn inter_chroma_444_422() {
         check_bit_exact(&ff, &s);
     }
 }
+
+/// Profile 2 12-bit bitstream exercise: validate every decoded sample against libdav1d.
+/// Encoder availability varies with the distribution's ffmpeg/libaom build, so an
+/// unavailable high-bitdepth libaom build is a visible skip rather than a false pass.
+#[test]
+fn inter_12bit_profile_two() {
+    let Some(ff) = ffmpeg_libaom() else { return };
+    let available = std::process::Command::new(&ff)
+        .args([
+            "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=64x64:r=1",
+            "-frames:v", "1", "-pix_fmt", "yuv420p12le", "-c:v", "libaom-av1",
+            "-cpu-used", "8", "-f", "null", "-",
+        ])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !available {
+        filmcraft_testkit::skip("av1 12-bit oracle", "this ffmpeg/libaom build cannot encode yuv420p12le");
+        return;
+    }
+    let p = ["-cpu-used", "8", "-crf", "40"];
+    for spec in [
+        Spec::new("inter_aom_420_12bit", "testsrc2=s=128x96:r=25", 3, "yuv420p12le", &p).encoder("libaom-av1"),
+        Spec::new("inter_aom_422_12bit", "testsrc2=s=128x96:r=25", 3, "yuv422p12le", &p).encoder("libaom-av1"),
+        Spec::new("inter_aom_444_12bit", "testsrc2=s=128x96:r=25", 3, "yuv444p12le", &p).encoder("libaom-av1"),
+    ] {
+        check_bit_exact(&ff, &spec);
+    }
+}
