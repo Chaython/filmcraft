@@ -10,38 +10,24 @@ Decoding Process Specification v1.0.0 with Errata 1.
 - **Clean-room**: Pure arithmetic coding and bitstream synthesis implemented directly from mathematical specifications and official syntax tables without linking, bundling, or copying third-party code.
 - **Verified decoding**: The generated Open Bitstream Units (Temporal Delimiter, Sequence Header, Frame Header, and Tile Group) are validated and bit-exact decoded by `filmcraft-av1::Decoder` and packaged by `filmcraft-isobmff` into standard MP4 files.
 
-## Current Scope (v0.1.0 Baseline All-Intra)
+## Current Scope (experimental 8-bit software AV1)
 
-This crate provides a pure-Rust, zero-dependency (L0 layer) baseline encoder designed for rapid Intra-frame exports and proxy encoding:
+This crate is a clean-room baseline AV1 encoder for **8-bit BT.709 SDR, 4:2:0** source frames. It integrates with FilmCraft's AV1 export factory as a software fallback. Its actual emitted packets, frame quality and independent decoder conformance must be verified before production use.
 
-1. **Compliant Bitstream Synthesis**:
-   - Temporal Delimiter, Sequence Header, Frame Header, and Tile Group OBUs.
-   - Profile 0 (8-bit 4:2:0 chroma subsampling) with configurable resolutions up to 8K.
-2. **Boolean Entropy Coder**:
-   - Clean-room Daala-style arithmetic coder (`SymbolEncoder`) operating on 15-bit precision CDF tables (Section 9 of the AV1 spec).
-3. **Intra Prediction Engine**:
-   - 5 prediction modes: DC, Vertical, Horizontal, Smooth, and Paeth (Section 7.11.2).
-   - Chunked SIMD SAD evaluation using `as_chunks::<16>()`.
-   - Precalculated horizontal weights and loop-invariant hoisting for Smooth and Paeth distortion calculations.
-   - Early Mode Termination: bypasses complex directional evaluations for near-flat blocks to minimize encode latency.
-4. **Multicore Parallelism**:
-   - Superblock row analysis and mode selection run concurrently across all available CPU cores using `rayon`.
-5. **Rate Control**:
-   - 1-pass CBR and VBR with sliding bit reservoir.
-   - Constant Quality (CRF mapped to qindex 0..255) and direct Qindex modes.
-   - Adaptive Quantization (AQ) based on spatial variance.
-6. **Quality Evaluation**:
-   - Built-in `compute_mse`, `compute_psnr`, and `compute_psnr_u16` metric helpers for test verification.
+- **Bitstream:** Sequence headers, frame headers, tile groups, OBU framing and AV1 entropy coding.
+- **Prediction:** Intra modes and a preliminary P-frame/zero-motion reference path. This is not a complete AV1 motion search implementation.
+- **Residuals:** Transform/quantization and coefficient coding paths are present. Existing software-oracle tests are not sufficient to claim all AV1 modes conform.
+- **Rate control:** Baseline CBR/VBR/CRF-like and direct qindex selection, with provisional scene-cut logic and adaptive quantization.
+- **Filters:** Experimental in-loop CDEF; filter coverage and reconstruction equivalence require independent test vectors.
+- **Concurrency:** Rayon is optional through the `threads` feature. No thread count or high-resolution performance guarantee has been established on this integration.
 
-## Honest Assessment & Limitations
+## Known limitations
 
-Production AV1 encoders (such as `svt-av1` and `rav1e`) represent hundreds of person-years of research and millions of lines of code. For clarity and transparent engineering, the current baseline scope has the following limitations:
-
-- **All-Intra Only**: Every frame is currently encoded as a self-contained Intra keyframe. Inter-frame compression (motion search, 1/8-pel motion vectors, and reference frame buffers) is planned for future milestones.
-- **Fixed Superblock Partition**: Superblocks are currently encoded with `PARTITION_NONE` (64x64). Recursive sub-block splitting (32x32, 16x16, 8x8, 4x4) is not yet enabled in the bitstream syntax.
-- **Skip Residual Coding**: Superblocks currently signal `skip = 1` in the tile payload, relying on directional and smooth intra prediction for reconstruction. Full non-skip transform residual entropy coding (DCT/ADST coefficients, EOB, level/sign bits) is under development in `transform.rs`.
-- **In-Loop Filters**: Deblocking, CDEF (Constrained Directional Enhancement Filter), and Loop Restoration are disabled in the frame header.
+- The encoder uses **Profile 0 8-bit 4:2:0 only**. It cannot write 10-bit, 12-bit, 4:2:2, 4:4:4, monochrome, full-range RGB, PQ or HLG output.
+- It does not provide the complete AV1 partition/motion-estimation/tool set of a production encoder.
+- Fidelity, compression ratios and decoder interoperability require independent ffmpeg/dav1d testing of multiple real-frame and hostile-input fixtures; passing a proprietary/in-tree decoder test alone is insufficient.
+- Hardware AV1 Main/Main10 exports are a separate NVENC implementation. Failure to encode HDR must not silently fall back to this 8-bit path and retain HDR signaling.
 
 ## Layering
 
-As an L0 codec crate in FilmCraft's architecture, `filmcraft-av1enc` depends only on `filmcraft-bitstream` and standard library mathematical routines (`cargo xtask layers` verified).
+As an L0 codec crate in FilmCraft's architecture, `filmcraft-av1enc` depends only on `filmcraft-bitstream` plus its optional Rayon concurrency dependency, with no platform FFI.
