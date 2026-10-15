@@ -101,7 +101,16 @@ mod windows_gpu {
         assert!(mkv_decoded.status.success(), "{name} MKV decoding failed: {}", String::from_utf8_lossy(&mkv_decoded.stderr));
         assert_eq!(mkv_decoded.stdout, decoded.stdout, "{name} changed decoded AV1 pixels during MP4-to-MKV stream copy");
         let probe = Command::new("ffprobe")
-            .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name,pix_fmt,color_primaries,color_transfer,color_space", "-of", "default=noprint_wrappers=1"])
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=codec_name,pix_fmt,color_primaries,color_transfer,color_space",
+                "-of",
+                "default=noprint_wrappers=1",
+            ])
             .arg(&mkv)
             .output()
             .expect("ffprobe is required for real GPU acceptance");
