@@ -699,10 +699,18 @@ impl ExportSettings {
                     v += &format!(", keyframe every {} frames", r.keyint);
                 }
                 Format::Av1 => {
-                    let profile = if crate::hdr_available(Format::Av1) { "AV1 Main / Main 10 for HDR" } else { "AV1 Main" };
-                    v += &format!(", {profile} (hardware encoder), {}", self.bitrate_mode.label());
+                    let software = crate::job::av1_software_sdr(self);
+                    let profile = if software {
+                        "AV1 Main (8-bit BT.709 SDR, software)"
+                    } else if crate::hdr_available(Format::Av1) {
+                        "AV1 Main / Main 10 for HDR (hardware Auto, 8-bit SDR software fallback)"
+                    } else {
+                        "AV1 Main (hardware Auto, 8-bit SDR software fallback)"
+                    };
+                    v += &format!(", {profile}, {}", self.bitrate_mode.label());
                     v += &match self.bitrate_mode {
                         BitrateMode::Cbr => format!(", {}", mbps(r.target_kbps)),
+                        BitrateMode::Crf => format!(" {}", self.crf),
                         _ => format!(", Target {}, Max {}", mbps(r.target_kbps), mbps(r.max_kbps)),
                     };
                     v += &format!(", keyframe every {} frames", r.keyint);

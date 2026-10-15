@@ -194,6 +194,11 @@ pub fn stepped(format: Format) -> bool {
 
 /// Whether an export is HDR: an HDR working space, SDR not asked for, and a format whose encoder
 /// writes HDR (`hdr_available` says so for H.265 and AV1, which have no built-in encoder).
+/// AV1 CRF and Hardware Encoding Off select the 8-bit BT.709 software path.
+pub(crate) fn av1_software_sdr(s: &ExportSettings) -> bool {
+    s.video_format() == Format::Av1 && (s.hardware_encoding == crate::HardwareEncoding::Off || s.bitrate_mode == crate::BitrateMode::Crf)
+}
+
 pub(crate) fn hdr_output(working_hdr: bool, sdr: bool, format: Format, hdr_available: impl Fn(Format) -> bool) -> bool {
     working_hdr
         && !sdr
@@ -230,7 +235,7 @@ impl Exporter {
         let pipe = q.settings.color;
         let hdr_out = hdr_output(
             pipe.working.is_hdr(),
-            settings.sdr || (settings.video_format() == Format::Av1 && settings.hardware_encoding == crate::HardwareEncoding::Off),
+            settings.sdr || av1_software_sdr(settings),
             settings.video_format(),
             crate::hdr_available,
         );

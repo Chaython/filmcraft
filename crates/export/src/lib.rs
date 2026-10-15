@@ -73,9 +73,9 @@ pub enum Format {
     /// ([`hdr_available`]); elsewhere they are tone-mapped to SDR.
     #[serde(rename = "hevc", alias = "Hevc")]
     Hevc,
-    /// MPEG-4 (or QuickTime, see [`Multiplexer`]), AV1 Main profile (8-bit or 10-bit HDR) video + AAC audio.
-    /// There is no built-in encoder: a platform hardware encoder registers one ([`register_encoder`])
-    /// and says so with [`register_format_probe`]; [`available`] is false without it.
+    /// MPEG-4 or QuickTime AV1 video + AAC audio: built-in experimental 8-bit 4:2:0 SDR
+    /// software encoder, with optional hardware Main/Main10 support (for example NVIDIA NVENC
+    /// on Windows, including 10-bit PQ/HLG when the GPU accepts it).
     #[serde(rename = "av1", alias = "Av1", alias = "AV1")]
     Av1,
     /// QuickTime, Apple ProRes 422 (HQ unless the settings pick another flavour) + PCM.
