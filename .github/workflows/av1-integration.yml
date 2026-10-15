@@ -51,6 +51,10 @@ jobs:
         run: cargo test -p filmcraft-av1 --test oracle_inter inter_12bit_profile_two -- --nocapture
         env:
           FILMCRAFT_REQUIRE_AV1_ORACLE: ${{ runner.os == 'Linux' && '1' || '' }}
+      - name: High precision AV1 software encode conformance
+        run: cargo test -p filmcraft-export --lib ffmpeg_av1 -- --nocapture
+        env:
+          FILMCRAFT_REQUIRE_AV1_ORACLE: ${{ runner.os == 'Linux' && '1' || '' }}
       - name: AV1 export presets and fallback tests
         run: cargo test -p filmcraft-export --lib av1
       - name: AV1 integration and pixel format tests

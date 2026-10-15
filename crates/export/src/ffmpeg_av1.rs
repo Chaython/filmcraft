@@ -351,4 +351,35 @@ mod tests {
             assert_eq!(quantize(1.0, depth, false, true), ((1u32 << depth) - 1) as u16);
         }
     }
+
+    #[test]
+    fn libaom_high_bitdepth_and_chroma_profiles_produce_verified_av1c() {
+        let strict = std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() == Ok("1");
+        let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+        if Command::new(ffmpeg).arg("-version").output().is_err() {
+            assert!(!strict, "FFmpeg/libaom AV1 is required by Linux conformance CI");
+            return;
+        }
+        let rgba = vec![128u8; 64 * 64 * 4];
+        for fmt in [Av1PixelFormat::Yuv420p12, Av1PixelFormat::Yuv422p10, Av1PixelFormat::Yuv444p12] {
+            let settings = ExportSettings { format: Format::Av1, av1_pixel_format: fmt, bitrate_mode: BitrateMode::Crf, crf: 35.0, ..Default::default() };
+            let mut enc = FfmpegAv1Encoder::new(64, 64, FrameRate::FPS_24, &settings).expect("FFmpeg encoder");
+            for i in 0..2u64 {
+                let f = EncoderFrame { width: 64, height: 64, rgba: &rgba, hdr: None, index: i };
+                assert!(enc.encode(&f).expect("spool AV1 frame").is_empty());
+            }
+            let packets = enc.flush().expect("libaom AV1 encode");
+            assert_eq!(packets.len(), 2, "one encoded sample per input frame");
+            let entry = enc.final_sample_entry().expect("validated av1C").expect("video entry");
+            match entry.codec {
+                filmcraft_isobmff::CodecConfig::Av1(config) => {
+                    assert_eq!((config.high_bitdepth, config.twelve_bit), (true, fmt.bit_depth() == 12));
+                    let (sx, sy) = fmt.chroma_shift();
+                    assert_eq!((config.chroma_subsampling_x, config.chroma_subsampling_y), (sx != 0, sy != 0));
+                    assert!(!config.config_obus.is_empty(), "real AV1 sequence OBU required");
+                }
+                _ => panic!("expected av1C sample entry"),
+            }
+        }
+    }
 }
