@@ -41,10 +41,16 @@ jobs:
         run: cargo test -p filmcraft-av1 -p filmcraft-av1enc --lib
       - name: AV1 software MP4 and residual round-trip tests
         run: cargo test -p filmcraft-av1enc --test mp4_roundtrip --test residual_decode
+        env:
+          FILMCRAFT_REQUIRE_AV1_ORACLE: ${{ runner.os == 'Linux' && '1' || '' }}
       - name: AV1 4:2:2 and 4:4:4 independent decoder parity
         run: cargo test -p filmcraft-av1 --test oracle_inter inter_chroma_444_422 -- --nocapture
+        env:
+          FILMCRAFT_REQUIRE_AV1_ORACLE: ${{ runner.os == 'Linux' && '1' || '' }}
       - name: AV1 Profile 2 12-bit independent decoder parity
         run: cargo test -p filmcraft-av1 --test oracle_inter inter_12bit_profile_two -- --nocapture
+        env:
+          FILMCRAFT_REQUIRE_AV1_ORACLE: ${{ runner.os == 'Linux' && '1' || '' }}
       - name: AV1 export presets and fallback tests
         run: cargo test -p filmcraft-export --lib av1
       - name: AV1 integration and pixel format tests

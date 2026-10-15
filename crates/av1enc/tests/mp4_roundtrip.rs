@@ -53,11 +53,23 @@ fn test_av1enc_mp4_mux_and_decode() {
     if std::process::Command::new("ffmpeg").arg("-version").output().is_ok_and(|o| o.status.success()) {
         let path = filmcraft_testkit::temp_path(&filmcraft_testkit::fixtures_dir("av1enc-external-oracle").join("flat-main.mp4"));
         std::fs::write(&path, &mp4_bytes).unwrap();
-        let decoded =
-            std::process::Command::new("ffmpeg").args(["-hide_banner", "-v", "error", "-xerror", "-i"]).arg(&path).args(["-f", "null", "-"]).output().unwrap();
+        let decoded = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+            .arg(&path)
+            .args(["-pix_fmt", "yuv420p", "-f", "rawvideo", "-"])
+            .output()
+            .unwrap();
         let _ = std::fs::remove_file(&path);
-        assert!(decoded.status.success(), "independent ffmpeg AV1 decode failed: {}", String::from_utf8_lossy(&decoded.stderr));
+        assert!(decoded.status.success(), "independent libdav1d AV1 decode failed: {}", String::from_utf8_lossy(&decoded.stderr));
+        let plane_size = (w * h) as usize;
+        let uv_size = (w / 2 * (h / 2)) as usize;
+        let frame_size = plane_size + 2 * uv_size;
+        assert_eq!(decoded.stdout.len(), frame_size * 5, "external decoder must output exactly five complete AV1 frames");
+        for raw in decoded.stdout.chunks_exact(frame_size) {
+            assert!(raw.iter().all(|&sample| sample == 128), "external AV1 decoder must reconstruct the exact constant YUV test image");
+        }
     } else {
+        assert!(std::env::var_os("FILMCRAFT_REQUIRE_AV1_ORACLE").is_none(), "FFmpeg with libdav1d is required by AV1 CI");
         eprintln!("SKIPPED independent AV1 oracle: ffmpeg is not installed");
     }
 
