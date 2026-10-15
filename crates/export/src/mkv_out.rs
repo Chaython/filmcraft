@@ -70,9 +70,12 @@ pub(crate) fn begin(settings: &ExportSettings) -> Result<(PendingMkv, Out)> {
     if !result.status.success() {
         return Err(ExportError::Unsupported("FFmpeg could not start: MKV export needs its Matroska muxer".into()));
     }
-    let muxers = Command::new(&tool).args(["-hide_banner", "-muxers"]).output()
+    let muxers = Command::new(&tool)
+        .args(["-hide_banner", "-muxers"])
+        .output()
         .map_err(|e| ExportError::Unsupported(format!("cannot check FFmpeg Matroska muxer: {e}")))?;
-    if !muxers.status.success() || !String::from_utf8_lossy(&muxers.stdout).lines().any(|line| line.trim_start().starts_with("E") && line.contains("matroska")) {
+    if !muxers.status.success() || !String::from_utf8_lossy(&muxers.stdout).lines().any(|line| line.trim_start().starts_with("E") && line.contains("matroska"))
+    {
         return Err(ExportError::Unsupported("this FFmpeg build has no Matroska writer; install FFmpeg with the matroska muxer".into()));
     }
     let dir = if settings.sink.is_some() { std::env::temp_dir() } else { target_dir(settings).to_path_buf() };
