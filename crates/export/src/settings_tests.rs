@@ -1085,9 +1085,8 @@ fn av1_mkv_pq_and_hlg_colour_metadata_survives_remux() {
 #[test]
 fn av1_nvenc_sdr_main10_rgba_conversion_preserves_yuv_precision() {
     let rgba = [
-        0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 0, 255,
-        0, 255, 0, 255, 0, 0, 255, 255, 128, 128, 128, 255,
-        12, 80, 190, 255, 240, 160, 20, 255, 90, 45, 170, 255,
+        0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 128, 128, 128, 255, 12, 80, 190, 255, 240, 160, 20, 255, 90, 45, 170,
+        255,
     ];
     let rgb: Vec<f32> = rgba.chunks_exact(4).flat_map(|pixel| pixel[..3].iter().map(|&v| f32::from(v) / 255.0)).collect();
     let (mut y, mut u, mut v) = (Vec::new(), Vec::new(), Vec::new());
