@@ -5,7 +5,7 @@
 use filmcraft_time::FrameRate;
 use serde::{Deserialize, Serialize};
 
-use crate::settings::{AudioCodec, AudioSettings, BitrateMode, MxfVideoCodec, Scaling};
+use crate::settings::{AudioCodec, AudioSettings, BitrateMode, HardwareEncoding, MxfVideoCodec, Scaling};
 use crate::{ExportSettings, Format};
 
 /// A named set of export settings (`path` and `range` are left empty).
@@ -49,6 +49,7 @@ fn h264(size: Option<(u32, u32)>, kbps: u32, max_kbps: u32) -> ExportSettings {
 fn av1(size: Option<(u32, u32)>, kbps: u32, max_kbps: u32) -> ExportSettings {
     ExportSettings {
         format: Format::Av1,
+        hardware_encoding: HardwareEncoding::Auto,
         frame_size: size,
         bitrate_kbps: kbps,
         max_bitrate_kbps: Some(max_kbps),

@@ -202,7 +202,7 @@ fn the_software_h264_sei_is_the_static_metadata_laid_out_as_messages() {
 
 #[test]
 fn av1_software_export_modes_force_sdr_for_hdr_sources() {
-    let base = ExportSettings { format: Format::Av1, ..Default::default() };
+    let base = ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, ..Default::default() };
     assert!(!job::av1_software_sdr(&base));
     let off = ExportSettings { hardware_encoding: HardwareEncoding::Off, ..base.clone() };
     let crf = ExportSettings { bitrate_mode: BitrateMode::Crf, ..base.clone() };
@@ -210,8 +210,6 @@ fn av1_software_export_modes_force_sdr_for_hdr_sources() {
     assert!(job::av1_software_sdr(&crf));
     let hevc_crf = ExportSettings { format: Format::Hevc, ..crf };
     assert!(!job::av1_software_sdr(&hevc_crf));
-    for sw in [&off] {
-        assert!(!job::hdr_output(true, job::av1_software_sdr(sw), Format::Av1, |_| true));
-    }
+    assert!(!job::hdr_output(true, job::av1_software_sdr(&off), Format::Av1, |_| true));
     assert!(!job::hdr_output(true, job::av1_software_sdr(&ExportSettings { bitrate_mode: BitrateMode::Crf, ..base }), Format::Av1, |_| true));
 }
