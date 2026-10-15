@@ -1136,7 +1136,7 @@ fn av1_nvenc_sdr_main10_rgba_conversion_preserves_yuv_precision() {
     let (mut expected_y, mut expected_u, mut expected_v) = (Vec::new(), Vec::new(), Vec::new());
     rgba_to_yuv420_10(&rgba, 3, 3, &mut y, &mut u, &mut v).unwrap();
     rgbf_to_yuv420_10(&rgb, 3, 3, 0.2126, 0.0722, &mut expected_y, &mut expected_u, &mut expected_v).unwrap();
-    assert_eq!((y, u, v), (expected_y, expected_u, expected_v), "SDR Main10 must retain 10-bit YUV precision and odd-edge chroma");
+    assert_eq!((&y, &u, &v), (&expected_y, &expected_u, &expected_v), "SDR Main10 must retain 10-bit YUV precision and odd-edge chroma");
     assert_eq!(expected_y[0], 64, "studio black");
     assert_eq!(expected_y[1], 940, "studio white");
     assert!(rgba_to_yuv420_10(&rgba[..7], 3, 3, &mut y, &mut u, &mut v).is_err(), "a truncated picture must fail, never panic");
