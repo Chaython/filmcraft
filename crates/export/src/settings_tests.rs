@@ -1041,10 +1041,7 @@ fn av1_mkv_flac_and_pcm_audio_tracks_roundtrip() {
     }
     let (project, seq, sources) = matte([0.1, 0.6, 0.3, 1.0], 128, 96, Some(-9.0));
     let dir = Scratch::new("av1-mkv-audio-formats");
-    for (codec, bits, name, expected) in [
-        (AudioCodec::Flac, 24, "flac.mkv", "flac"),
-        (AudioCodec::Pcm, 16, "pcm.mkv", "pcm_s16le"),
-    ] {
+    for (codec, bits, name, expected) in [(AudioCodec::Flac, 24, "flac.mkv", "flac"), (AudioCodec::Pcm, 16, "pcm.mkv", "pcm_s16le")] {
         let path = dir.path(name);
         let settings = ExportSettings {
             format: Format::Av1,
