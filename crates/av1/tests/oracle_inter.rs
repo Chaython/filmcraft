@@ -126,9 +126,24 @@ fn inter_12bit_profile_two() {
     let Some(ff) = ffmpeg_libaom() else { return };
     let available = std::process::Command::new(&ff)
         .args([
-            "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=64x64:r=1",
-            "-frames:v", "1", "-pix_fmt", "yuv420p12le", "-c:v", "libaom-av1",
-            "-cpu-used", "8", "-f", "null", "-",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=64x64:r=1",
+            "-frames:v",
+            "1",
+            "-pix_fmt",
+            "yuv420p12le",
+            "-c:v",
+            "libaom-av1",
+            "-cpu-used",
+            "8",
+            "-f",
+            "null",
+            "-",
         ])
         .output()
         .is_ok_and(|o| o.status.success());
