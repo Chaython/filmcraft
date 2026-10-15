@@ -32,13 +32,7 @@ mod windows_gpu {
         let hdr = vec![0.5f32; (w * h * 3) as usize];
         let mut packets = Vec::new();
         for i in 0..16u64 {
-            let frame = EncoderFrame {
-                width: w,
-                height: h,
-                rgba: if ten_bit { &[] } else { &rgba },
-                hdr: ten_bit.then_some(hdr.as_slice()),
-                index: i,
-            };
+            let frame = EncoderFrame { width: w, height: h, rgba: if ten_bit { &[] } else { &rgba }, hdr: ten_bit.then_some(hdr.as_slice()), index: i };
             packets.extend(encoder.encode(&frame).expect("encode 16 hardware AV1 frames"));
         }
         packets.extend(encoder.flush().expect("drain hardware encoder"));
@@ -88,7 +82,11 @@ mod windows_gpu {
             .expect("independent ffmpeg/libdav1d must be installed for hardware acceptance");
         let _ = std::fs::remove_file(&path);
         assert!(decoded.status.success(), "{name} hardware AV1 MP4 failed independent decoding: {}", String::from_utf8_lossy(&decoded.stderr));
-        assert_eq!(decoded.stdout.len(), (w * h * 3 / 2 * 16 * if ten_bit { 2 } else { 1 }) as usize, "{name} returned truncated or incorrectly framed AV1 video");
+        assert_eq!(
+            decoded.stdout.len(),
+            (w * h * 3 / 2 * 16 * if ten_bit { 2 } else { 1 }) as usize,
+            "{name} returned truncated or incorrectly framed AV1 video"
+        );
     }
 
     #[test]
@@ -117,5 +115,4 @@ mod windows_gpu {
         run_gpu_encoder("nvidia-main", filmcraft_platform::nvenc::export::factory, false);
         run_gpu_encoder("nvidia-main10", filmcraft_platform::nvenc::export::factory, true);
     }
-
 }
