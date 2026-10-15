@@ -246,6 +246,19 @@ impl FfmpegAv1Encoder {
         if !status.status.success() {
             return Err(ExportError::Unsupported("FFmpeg did not start successfully".into()));
         }
+        // Fail before rendering/spooling a long export when the installed FFmpeg is
+        // missing the required libaom encoder or AV1 sequence-header metadata filter.
+        for (flag, required) in [("-encoders", "libaom-av1"), ("-bsfs", "av1_metadata")] {
+            let capabilities = Command::new(&ffmpeg)
+                .args(["-hide_banner", flag])
+                .output()
+                .map_err(|e| ExportError::Unsupported(format!("FFmpeg AV1 capability probe failed: {e}")))?;
+            if !capabilities.status.success() || !String::from_utf8_lossy(&capabilities.stdout).contains(required) {
+                return Err(ExportError::Unsupported(format!(
+                    "the installed FFmpeg does not provide required {required}; install a build with libaom AV1 and av1_metadata"
+                )));
+            }
+        }
         let (raw, raw_path, ivf_path) = unique_temp_file()?;
         Ok(Self {
             ffmpeg,
