@@ -1126,6 +1126,46 @@ fn av1_mkv_pq_and_hlg_colour_metadata_survives_remux() {
 }
 
 #[test]
+fn av1_mkv_hdr_to_sdr_main10_preserves_rec709_metadata() {
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "HDR to SDR AV1 test requires FFmpeg");
+        return;
+    }
+    let (mut project, seq, sources) = matte([0.2, 0.5, 0.8, 1.0], 160, 96, None);
+    Arc::get_mut(&mut project).expect("unique HDR project").sequence_mut(seq).unwrap().settings.color.working = filmcraft_color::WorkingSpace::Rec2100Pq;
+    let temp = Scratch::new("av1-hdr-to-sdr-main10");
+    let path = temp.path("rec709-sdr.mkv");
+    let settings = ExportSettings {
+        format: Format::Av1,
+        multiplexer: Multiplexer::Mkv,
+        av1_pixel_format: Av1PixelFormat::Yuv420p10,
+        bitrate_mode: BitrateMode::Crf,
+        crf: 35.0,
+        sdr: true,
+        include_audio: false,
+        path: path.clone(),
+        range: Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(2))),
+        ..Default::default()
+    };
+    export(&project, seq, &settings, &sources, &Progress::default()).expect("tone-map HDR to 10-bit SDR");
+    let probe = ffprobe_json(&["-show_entries", "stream=codec_name,pix_fmt,color_primaries,color_transfer,color_space"], &path).expect("probe output");
+    let video = &probe["streams"][0];
+    assert_eq!(video["codec_name"], "av1");
+    assert_eq!(video["pix_fmt"], "yuv420p10le", "tone-mapped 10-bit SDR should not drop to 8-bit");
+    assert_eq!(video["color_primaries"], "bt709", "tone-mapped output must be BT.709 SDR");
+    assert_eq!(video["color_transfer"], "bt709", "tone-mapped output must not retain PQ");
+    assert_eq!(video["color_space"], "bt709");
+    let decoded = std::process::Command::new(ffmpeg)
+        .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+        .arg(&path)
+        .args(["-f", "null", "-"])
+        .output()
+        .expect("decode tone-mapped AV1");
+    assert!(decoded.status.success(), "HDR-to-SDR AV1 decoding failed: {}", String::from_utf8_lossy(&decoded.stderr));
+}
+
+#[test]
 fn av1_nvenc_sdr_main10_rgba_conversion_preserves_yuv_precision() {
     let rgba = [
         0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 128, 128, 128, 255, 12, 80, 190, 255, 240, 160, 20, 255, 90, 45, 170,

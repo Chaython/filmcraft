@@ -180,7 +180,11 @@ impl Pipeline {
         let h = u32::try_from(h).map_err(|_| ExportError::Unsupported("rendered picture height is too large".into()))?;
         filmcraft_project::validate_frame_size(w, h).map_err(ExportError::Unsupported)?;
         let pipe = q.settings.color;
-        let out_tf = hdr_out.then(|| filmcraft_color::OutputTransform::new(&pipe, pipe.working.output_space()));
+        // Floating-point output does not necessarily mean HDR. A high-depth SDR
+        // AV1 export from an HDR timeline must tone-map into Rec.709 in float,
+        // not encode PQ/HLG with a falsely labeled SDR stream.
+        let target = if settings.signal.is_hdr() { pipe.working.output_space() } else { filmcraft_color::ColorSpace::Rec709 };
+        let out_tf = hdr_out.then(|| filmcraft_color::OutputTransform::new(&pipe, target));
         let opts = RenderOptions { scale: geom.render_scale, captions: settings.burn_captions, working_output: hdr_out, ..Default::default() };
         let effects = settings.effects.clone();
         let overlay = if effects.image_overlay.enabled && !effects.image_overlay.path.is_empty() {

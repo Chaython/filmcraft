@@ -217,7 +217,8 @@ fn av1_software_export_modes_force_sdr_for_hdr_sources() {
     assert!(!job::hdr_output(true, job::av1_requires_sdr(&base), Format::Av1, |_| true));
     assert!(!job::av1_sdr_float(&base, false), "AV1 8-bit SDR should keep the low-memory RGBA8 path");
     assert!(job::av1_sdr_float(&ten_bit, false), "AV1 SDR Main10 must preserve encoded float precision");
-    assert!(!job::av1_sdr_float(&ten_bit, true), "HDR already follows its own output and tone-mapping decisions");
+    assert!(!job::av1_sdr_float(&ten_bit, true), "HDR encoded output already preserves precision");
+    assert!(job::av1_sdr_float(&ten_bit, false), "HDR-to-SDR Main10 still needs float tone-mapping rather than RGBA8");
     let twelve_bit = ExportSettings { av1_pixel_format: Av1PixelFormat::Yuv444p12, ..base.clone() };
     assert!(job::av1_sdr_float(&twelve_bit, false), "Professional 12-bit SDR must preserve encoded float precision");
     assert!(!job::av1_sdr_float(&ExportSettings { format: Format::Hevc, ..ten_bit }, false));
