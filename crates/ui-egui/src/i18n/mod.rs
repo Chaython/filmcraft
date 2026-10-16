@@ -1380,6 +1380,7 @@ mod tests {
             }
         });
     }
+
     #[test]
     fn nvenc_rate_control_labels_are_translated() {
         let common = [
@@ -1410,5 +1411,4 @@ mod tests {
             }
         }
     }
-
 }
