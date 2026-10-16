@@ -42,11 +42,13 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Check GPU, export, desktop and CLI
         run: cargo check -p filmcraft-gpu -p filmcraft-export -p filmcraft-cli -p filmcraft --all-targets
+      # These tests create many wgpu devices. Serialize them so hosted software adapters and
+      # shader compilers are not overloaded by dozens of simultaneous pipeline compilations.
       - name: GPU compositor unit tests
-        run: cargo test -p filmcraft-gpu --lib
+        run: cargo test -p filmcraft-gpu --lib -- --test-threads=1
       - name: GPU / CPU export parity tests
-        run: cargo test -p filmcraft-gpu --test export_pipeline
+        run: cargo test -p filmcraft-gpu --test export_pipeline -- --test-threads=1
       - name: Export pipeline unit tests
-        run: cargo test -p filmcraft-export --lib
+        run: cargo test -p filmcraft-export --lib -- --test-threads=1
       - name: Strict lint
         run: cargo clippy -p filmcraft-gpu -p filmcraft-export -p filmcraft-cli -p filmcraft --all-targets -- -D warnings
