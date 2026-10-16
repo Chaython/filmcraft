@@ -86,8 +86,8 @@ fn sequence_with_operating_points(points: &[(u32, bool)]) -> Vec<u8> {
     write(63, 6); // 64 pixel maximum width
     write(63, 6); // 64 pixel maximum height
     write(0, 1); // no frame IDs
-    for _ in 0..8 {
-        write(0, 1); // all sequence prediction tools disabled
+    for _ in 0..7 {
+        write(0, 1); // filter-intra, edge-intra, compound, warp, dual, order-hint tools disabled
     }
     write(0, 1); // select_screen_content_tools is explicit
     write(0, 1); // screen-content tools disabled
