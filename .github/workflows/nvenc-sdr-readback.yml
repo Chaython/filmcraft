@@ -17,6 +17,12 @@ on:
 permissions:
   contents: read
 
+# Push and pull_request events can target the same head commit. Share a concurrency key so
+# the duplicate run is cancelled instead of consuming a second hosted runner.
+concurrency:
+  group: nvenc-sdr-readback-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   gpu-sdr:
     name: SDR readback / HDR-safe fallback (${{ matrix.os }})
