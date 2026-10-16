@@ -57,3 +57,65 @@ fn checked_independent_header_hostile_public_sequence_and_mutations_do_not_panic
         assert!(std::panic::catch_unwind(|| independent_frame_header_info(&sequence(false), &payload, 0, 0)).is_ok());
     }
 }
+
+/// An AV1 sequence header written MSB-first, with enough structure to validate
+/// operating-point level/tier parsing and all trailing bits independently.
+fn sequence_with_operating_points(points: &[(u32, bool)]) -> Vec<u8> {
+    assert!(!points.is_empty() && points.len() <= 32);
+    let mut bits = Vec::new();
+    let mut write = |value: u32, width: usize| {
+        for shift in (0..width).rev() {
+            bits.push(((value >> shift) & 1) != 0);
+        }
+    };
+    write(0, 3); // Main profile
+    write(0, 1); // not a still picture
+    write(0, 1); // full (not reduced) sequence header
+    write(0, 1); // no timing info
+    write(0, 1); // no initial display delay
+    write((points.len() - 1) as u32, 5);
+    for &(level, high_tier) in points {
+        write(0, 12); // operating point idc
+        write(level, 5);
+        if level > 7 {
+            write(u32::from(high_tier), 1);
+        }
+    }
+    write(5, 4); // six frame-width bits
+    write(5, 4); // six frame-height bits
+    write(63, 6); // 64 pixel maximum width
+    write(63, 6); // 64 pixel maximum height
+    write(0, 1); // no frame IDs
+    for _ in 0..8 {
+        write(0, 1); // all sequence prediction tools disabled
+    }
+    write(0, 1); // select_screen_content_tools is explicit
+    write(0, 1); // screen-content tools disabled
+    for _ in 0..3 {
+        write(0, 1); // superres, CDEF and restoration disabled
+    }
+    write(0, 1); // 8-bit
+    write(0, 1); // not monochrome
+    write(1, 1); // color description present
+    for _ in 0..3 {
+        write(1, 8); // BT.709 primaries, transfer and matrix
+    }
+    write(0, 1); // limited range
+    write(0, 2); // chroma sample position unknown
+    write(0, 1); // no separate UV delta-q
+    write(0, 1); // no film grain
+    write(1, 1); // required trailing_one_bit
+    bits.resize(bits.len().div_ceil(8) * 8, false);
+    bits.chunks(8).map(|chunk| chunk.iter().fold(0u8, |byte, &bit| (byte << 1) | u8::from(bit))).collect()
+}
+
+#[test]
+fn sequence_header_preserves_high_tier_for_each_operating_point() {
+    let header = SequenceHeader::parse_checked(&sequence_with_operating_points(&[(8, true), (9, false)])).unwrap();
+    assert_eq!(&header.seq_level_idx[..2], &[8, 9]);
+    assert_eq!(&header.seq_tier[..2], &[true, false]);
+    assert_eq!(header.color.bit_depth, 8);
+    let header = SequenceHeader::parse_checked(&sequence_with_operating_points(&[(7, true), (8, true), (9, false)])).unwrap();
+    assert_eq!(&header.seq_level_idx[..3], &[7, 8, 9]);
+    assert_eq!(&header.seq_tier[..3], &[false, true, false], "levels below 4.0 cannot signal high tier");
+}

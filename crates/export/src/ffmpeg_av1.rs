@@ -224,7 +224,7 @@ fn sequence_header(data: &[u8]) -> Option<(&[u8], &[u8])> {
 
 fn av1_config(packet: &[u8], requested: Av1PixelFormat, signal: ColorSignal, full_range: bool) -> Result<Av1Config> {
     let (obu, payload) = sequence_header(packet).ok_or_else(|| ExportError::Encode("libaom produced AV1 frames without a sequence header OBU".into()))?;
-    let seq = SequenceHeader::parse(payload).map_err(|e| ExportError::Encode(format!("invalid FFmpeg AV1 sequence header: {e}")))?;
+    let seq = SequenceHeader::parse_checked(payload).map_err(|e| ExportError::Encode(format!("invalid FFmpeg AV1 sequence header: {e}")))?;
     let (sx, sy) = requested.chroma_shift();
     if seq.profile != av1_profile(requested) {
         return Err(ExportError::Encode(format!(
@@ -246,7 +246,7 @@ fn av1_config(packet: &[u8], requested: Av1PixelFormat, signal: ColorSignal, ful
     Ok(Av1Config {
         seq_profile: seq.profile,
         seq_level_idx_0: seq.seq_level_idx[0],
-        seq_tier_0: false,
+        seq_tier_0: seq.seq_tier[0],
         high_bitdepth: color.bit_depth > 8,
         twelve_bit: color.bit_depth == 12,
         monochrome: false,

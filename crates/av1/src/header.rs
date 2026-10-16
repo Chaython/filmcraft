@@ -40,6 +40,9 @@ pub struct SequenceHeader {
     pub operating_points_cnt_minus_1: usize,
     pub operating_point_idc: [u32; 32],
     pub seq_level_idx: [u8; 32],
+    /// High tier for operating points with sequence level 4.0 (index 8) or greater.
+    /// Lower-level operating points always use Main Tier.
+    pub seq_tier: [bool; 32],
     pub decoder_model_present_for_this_op: [bool; 32],
     /// OperatingPointIdc of the chosen operating point (0).
     pub op_idc: u32,
@@ -131,7 +134,7 @@ impl SequenceHeader {
                 s.operating_point_idc[i] = r.f(12)?;
                 s.seq_level_idx[i] = r.f(5)? as u8;
                 if s.seq_level_idx[i] > 7 {
-                    r.f(1)?; // seq_tier
+                    s.seq_tier[i] = r.flag()?;
                 }
                 if s.decoder_model_info_present {
                     s.decoder_model_present_for_this_op[i] = r.flag()?;

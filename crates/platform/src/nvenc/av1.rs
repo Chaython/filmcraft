@@ -129,7 +129,7 @@ pub fn av1_config(sequence_params: &[u8], ten_bit: bool) -> Result<Av1Config, St
     }
     let (full_obu, payload) = extract_sequence_header_obu(sequence_params).ok_or_else(|| "no Sequence Header OBU found in NVENC parameters".to_string())?;
 
-    let parsed = SequenceHeader::parse(payload).map_err(|e| format!("parsing AV1 sequence header: {e:?}"))?;
+    let parsed = SequenceHeader::parse_checked(payload).map_err(|e| format!("parsing AV1 sequence header: {e:?}"))?;
 
     if parsed.color.bit_depth != if ten_bit { 10 } else { 8 } {
         return Err("NVENC AV1 sequence bit depth differs from the input configuration".into());
@@ -138,7 +138,7 @@ pub fn av1_config(sequence_params: &[u8], ten_bit: bool) -> Result<Av1Config, St
     let config = Av1Config {
         seq_profile: parsed.profile,
         seq_level_idx_0: parsed.seq_level_idx.first().copied().unwrap_or(0),
-        seq_tier_0: false,
+        seq_tier_0: parsed.seq_tier[0],
         high_bitdepth,
         twelve_bit: parsed.color.bit_depth == 12,
         monochrome: parsed.color.mono_chrome,
