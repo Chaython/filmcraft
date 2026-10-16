@@ -40,9 +40,9 @@ jobs:
       - name: Check affected crates and desktop app
         run: cargo check -p filmcraft-platform -p filmcraft-export -p filmcraft-ui-egui -p filmcraft --all-targets
       - name: Validate CQP settings and codec-specific QP ranges
-        run: cargo test -p filmcraft-export --lib cqp
+        run: cargo test -p filmcraft-export --lib cqp && cargo test -p filmcraft-export --lib software_encoders_reject_nvenc_only_rate_controls
       - name: Validate NVENC AV1 QP and rate-control configuration
-        run: cargo test -p filmcraft-platform --lib cqp
+        run: cargo test -p filmcraft-platform --lib cqp && cargo test -p filmcraft-platform --lib missing_driver_is_an_error_when_nvenc_rate_control_is_required
       - name: Validate translated rate-control UI
         run: cargo test -p filmcraft-ui-egui --lib catalogs_are_well_formed && cargo test -p filmcraft-ui-egui --lib nvenc_rate_control_labels_are_translated
       - name: Strict lint
