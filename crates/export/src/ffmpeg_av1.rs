@@ -523,7 +523,9 @@ mod tests {
         let max_pixels = 8192usize * 4320;
         let bytes_per_12bit_444_frame = max_pixels * 3 * 2;
         assert!(MAX_FRAME_BYTES > bytes_per_12bit_444_frame, "8K 12-bit 4:4:4 must not be rejected for exceeding the old 128 MiB packet cap");
-        const { assert!(MAX_FRAME_BYTES <= 512 * 1024 * 1024, "untrusted IVF packets still need a bounded allocation"); }
+        const {
+            assert!(MAX_FRAME_BYTES <= 512 * 1024 * 1024, "untrusted IVF packets still need a bounded allocation");
+        }
     }
 
     #[test]
