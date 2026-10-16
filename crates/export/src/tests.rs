@@ -552,7 +552,7 @@ fn av1_cqp_uses_the_full_av1_qp_range_and_rejects_software_fallbacks() {
         qp: Some(255),
         ..Default::default()
     };
-    assert!(s.validate().is_ok(), "AV1 NVENC CQP must accept QP 255");
+    assert_eq!(s.validate().is_ok(), cfg!(target_os = "windows"), "valid AV1 CQP is accepted only on the supported Windows NVENC path");
 
     s.qp = Some(256);
     assert!(s.validate().is_err(), "AV1 CQP above 255 must be rejected");
@@ -579,7 +579,7 @@ fn h264_cqp_uses_the_h264_qp_range() {
         qp: Some(51),
         ..Default::default()
     };
-    assert!(s.validate().is_ok(), "H.264 NVENC CQP must accept QP 51");
+    assert_eq!(s.validate().is_ok(), cfg!(target_os = "windows"), "valid H.264 CQP is accepted only on the supported Windows NVENC path");
     s.qp = Some(52);
     assert!(s.validate().is_err(), "H.264 CQP above 51 must be rejected");
 }
