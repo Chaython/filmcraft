@@ -741,19 +741,14 @@ impl ExportSettings {
             if self.qp.is_some_and(|qp| qp > max_qp) {
                 return Err(ExportError::Unsupported(format!("{} CQP must be between 0 and {max_qp}", self.format.label())));
             }
-            if self.format == Format::Av1
-                && (self.av1_full_range || !matches!(self.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10))
-            {
+            if self.format == Format::Av1 && (self.av1_full_range || !matches!(self.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10)) {
                 return Err(ExportError::Unsupported("NVENC AV1 CQP supports only limited-range 4:2:0 8-bit or 10-bit output".into()));
             }
         }
         if nvenc_controls && !cfg!(target_os = "windows") {
             return Err(ExportError::Unsupported("CQP, multipass, spatial AQ and lookahead currently require the Windows NVENC backend".into()));
         }
-        if (self.multipass || self.spatial_aq || self.lookahead.is_some())
-            && self.hardware_encoding == HardwareEncoding::Off
-            && self.format != Format::Hevc
-        {
+        if (self.multipass || self.spatial_aq || self.lookahead.is_some()) && self.hardware_encoding == HardwareEncoding::Off && self.format != Format::Hevc {
             return Err(ExportError::Unsupported("multipass, spatial AQ and lookahead require hardware encoding".into()));
         }
         if (self.format == Format::Hevc || self.format == Format::Av1) && self.bitrate_mode == BitrateMode::Vbr2Pass {
@@ -1873,7 +1868,9 @@ fn h264_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSetti
         return None;
     }
     if s.bitrate_mode == BitrateMode::Cqp || s.multipass || s.spatial_aq || s.lookahead.is_some() {
-        return Some(Err(ExportError::Unsupported("CQP, multipass, spatial AQ and lookahead require an available NVENC encoder; the software H.264 encoder cannot honor these settings".into())));
+        return Some(Err(ExportError::Unsupported(
+            "CQP, multipass, spatial AQ and lookahead require an available NVENC encoder; the software H.264 encoder cannot honor these settings".into(),
+        )));
     }
     let mut cfg = filmcraft_h264enc::EncoderConfig::new(w, h, rate.num as u32, rate.den as u32);
     // MXF carries the Annex B byte stream (ST 381-3) with in-band parameter sets
@@ -1997,7 +1994,9 @@ fn av1_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettin
         return None;
     }
     if s.bitrate_mode == BitrateMode::Cqp || s.multipass || s.spatial_aq || s.lookahead.is_some() {
-        return Some(Err(ExportError::Unsupported("CQP, multipass, spatial AQ and lookahead require an available NVENC AV1 encoder; software AV1 cannot honor these settings".into())));
+        return Some(Err(ExportError::Unsupported(
+            "CQP, multipass, spatial AQ and lookahead require an available NVENC AV1 encoder; software AV1 cannot honor these settings".into(),
+        )));
     }
     // Independent libdav1d validation rejected native AV1 output on a real export.
     // Do not send potentially invalid MP4/MOV streams to users just because they
