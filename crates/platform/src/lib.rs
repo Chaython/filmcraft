@@ -30,6 +30,8 @@
 
 // Used by the Windows (and, for `biplanar`, Linux) decoders; compiled everywhere so their tests run
 // on every system.
+#[cfg(target_os = "windows")]
+pub mod amf;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod annexb;
 #[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
@@ -44,6 +46,8 @@ pub mod media_foundation;
 pub mod nvdec;
 #[cfg(any(target_os = "windows", all(target_os = "linux", target_pointer_width = "64")))]
 pub mod nvenc;
+#[cfg(target_os = "windows")]
+pub mod qsv;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub mod vaapi;
 #[cfg(target_os = "macos")]
@@ -62,6 +66,36 @@ pub enum Availability {
     Available(&'static str),
     /// Nothing to register on this system (why).
     Unavailable(&'static str),
+}
+
+// The opt-in AMD/Intel integration must not accidentally take over existing H.264
+// or HEVC exports; it is explicitly limited to AV1 until those paths are validated.
+#[cfg(target_os = "windows")]
+fn experimental_amf_av1(
+    format: filmcraft_export::Format,
+    width: u32,
+    height: u32,
+    rate: filmcraft_time::FrameRate,
+    settings: &filmcraft_export::ExportSettings,
+) -> Option<filmcraft_export::Result<Box<dyn filmcraft_export::VideoEncoder>>> {
+    if format != filmcraft_export::Format::Av1 {
+        return None;
+    }
+    amf::export::factory(format, width, height, rate, settings)
+}
+
+#[cfg(target_os = "windows")]
+fn experimental_qsv_av1(
+    format: filmcraft_export::Format,
+    width: u32,
+    height: u32,
+    rate: filmcraft_time::FrameRate,
+    settings: &filmcraft_export::ExportSettings,
+) -> Option<filmcraft_export::Result<Box<dyn filmcraft_export::VideoEncoder>>> {
+    if format != filmcraft_export::Format::Av1 {
+        return None;
+    }
+    qsv::export::factory(format, width, height, rate, settings)
 }
 
 /// Register the platform's hardware video decoders (call once at startup; repeated calls are
@@ -90,14 +124,34 @@ pub fn register() -> Availability {
         // HDR sequences export as HEVC Main 10 (PQ / HLG) only where NVENC has a 10-bit encoder; elsewhere
         // (and on macOS, whose VideoToolbox path is 8-bit) they are tone-mapped to SDR, as before
         filmcraft_export::register_hdr_probe(filmcraft_export::Format::Hevc, nvenc::hevc_hdr_available);
+        filmcraft_export::register_format_probe(filmcraft_export::Format::Av1, nvenc::av1_available);
+        filmcraft_export::register_hdr_probe(filmcraft_export::Format::Av1, nvenc::av1_hdr_available);
         nvenc::warm_hevc_probe();
+        nvenc::warm_av1_probe();
+        // Opt-in for additional Windows hardware backends. A final av1C is written
+        // only after a real keyframe supplied parseable AV1 Sequence Header OBUs.
+        // Hardware acceptance is still experimental on AMD/Intel GPUs.
+        if std::env::var("FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS").as_deref() == Ok("1") {
+            filmcraft_export::register_format_probe(filmcraft_export::Format::Av1, amf::av1_available);
+            filmcraft_export::register_format_probe(filmcraft_export::Format::Av1, qsv::av1_available);
+            filmcraft_export::register_hdr_probe(filmcraft_export::Format::Av1, amf::av1_hdr_available);
+            filmcraft_export::register_hdr_probe(filmcraft_export::Format::Av1, qsv::av1_hdr_available);
+            amf::warm_av1_probe();
+            qsv::warm_av1_probe();
+        }
     }
     #[cfg(target_os = "windows")]
     {
         static ENCODERS: std::sync::Once = std::sync::Once::new();
         // Export ▸ Hardware encoding (NVENC H.264): in front of the software encoder, taking an
         // export only when asked for and when NVENC can do it
-        ENCODERS.call_once(|| filmcraft_export::register_encoder(nvenc::export::factory));
+        ENCODERS.call_once(|| {
+            if std::env::var("FILMCRAFT_EXPERIMENTAL_AV1_ENCODERS").as_deref() == Ok("1") {
+                filmcraft_export::register_encoder(experimental_amf_av1);
+                filmcraft_export::register_encoder(experimental_qsv_av1);
+            }
+            filmcraft_export::register_encoder(nvenc::export::factory);
+        });
         filmcraft_codecs::register_video_decoder(media_foundation_factory);
         filmcraft_codecs::hw::set_hw_backend("Media Foundation");
         Availability::Available("Media Foundation")
@@ -217,7 +271,7 @@ pub fn media_foundation_factory(entry: &filmcraft_isobmff::SampleEntry) -> Optio
         return None;
     }
     let info = media_foundation::stream_info(entry)?;
-    match media_foundation::MfDecoder::new(info.clone()) {
+    match media_foundation::MfDecoder::from_entry(entry) {
         Ok(mf) => Some(Ok(Box::new(HybridDecoder::new(Box::new(mf), entry.clone(), info)))),
         Err(why) => {
             log::info!("hardware decoding declined for {} video: {why}", entry.codec.name());

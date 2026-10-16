@@ -18,7 +18,9 @@ use std::io::Write;
 mod aac_out;
 mod audio_out;
 mod deflate;
+mod ffmpeg_av1;
 mod job;
+mod mkv_out;
 mod mxf_out;
 mod pace;
 mod pcm;
@@ -60,6 +62,65 @@ pub enum ExportError {
 
 pub type Result<T> = std::result::Result<T, ExportError>;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Av1PixelFormat {
+    #[default]
+    Yuv420p8,
+    Yuv420p10,
+    Yuv420p12,
+    Yuv422p8,
+    Yuv422p10,
+    Yuv422p12,
+    Yuv444p8,
+    Yuv444p10,
+    Yuv444p12,
+}
+impl Av1PixelFormat {
+    pub const ALL: [Self; 9] =
+        [Self::Yuv420p8, Self::Yuv420p10, Self::Yuv420p12, Self::Yuv422p8, Self::Yuv422p10, Self::Yuv422p12, Self::Yuv444p8, Self::Yuv444p10, Self::Yuv444p12];
+    pub const fn bit_depth(self) -> u8 {
+        match self {
+            Self::Yuv420p8 | Self::Yuv422p8 | Self::Yuv444p8 => 8,
+            Self::Yuv420p10 | Self::Yuv422p10 | Self::Yuv444p10 => 10,
+            _ => 12,
+        }
+    }
+    pub const fn chroma_shift(self) -> (usize, usize) {
+        match self {
+            Self::Yuv420p8 | Self::Yuv420p10 | Self::Yuv420p12 => (1, 1),
+            Self::Yuv422p8 | Self::Yuv422p10 | Self::Yuv422p12 => (1, 0),
+            _ => (0, 0),
+        }
+    }
+    pub const fn ffmpeg_name(self) -> &'static str {
+        match self {
+            Self::Yuv420p8 => "yuv420p",
+            Self::Yuv420p10 => "yuv420p10le",
+            Self::Yuv420p12 => "yuv420p12le",
+            Self::Yuv422p8 => "yuv422p",
+            Self::Yuv422p10 => "yuv422p10le",
+            Self::Yuv422p12 => "yuv422p12le",
+            Self::Yuv444p8 => "yuv444p",
+            Self::Yuv444p10 => "yuv444p10le",
+            Self::Yuv444p12 => "yuv444p12le",
+        }
+    }
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Yuv420p8 => "8-bit 4:2:0",
+            Self::Yuv420p10 => "10-bit 4:2:0",
+            Self::Yuv420p12 => "12-bit 4:2:0",
+            Self::Yuv422p8 => "8-bit 4:2:2",
+            Self::Yuv422p10 => "10-bit 4:2:2",
+            Self::Yuv422p12 => "12-bit 4:2:2",
+            Self::Yuv444p8 => "8-bit 4:4:4",
+            Self::Yuv444p10 => "10-bit 4:4:4",
+            Self::Yuv444p12 => "12-bit 4:4:4",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Format {
     /// MPEG-4 (or QuickTime, see [`Multiplexer`]), H.264 video + AAC audio.
@@ -73,9 +134,10 @@ pub enum Format {
     /// ([`hdr_available`]); elsewhere they are tone-mapped to SDR.
     #[serde(rename = "hevc", alias = "Hevc")]
     Hevc,
-    /// MPEG-4, AV1 Main (8-bit) video + AAC audio. Like H.265 it has no built-in encoder: offered
-    /// where a hardware encoder registers one.
-    #[serde(rename = "av1", alias = "Av1")]
+    /// AV1 video in MP4, MOV or MKV: optional hardware Main/Main10 or software
+    /// libaom-av1 (via local FFmpeg). The experimental built-in Rust AV1 encoder is
+    /// available only with FILMCRAFT_EXPERIMENTAL_NATIVE_AV1=1 for diagnostics.
+    #[serde(rename = "av1", alias = "Av1", alias = "AV1")]
     Av1,
     /// QuickTime, Apple ProRes 422 (HQ unless the settings pick another flavour) + PCM.
     #[serde(rename = "prores", alias = "ProRes")]
@@ -251,15 +313,15 @@ impl Format {
     /// Whether the crate carries an encoder for the format; the others need one registered at runtime
     /// ([`register_format_probe`]).
     pub fn has_builtin_encoder(self) -> bool {
-        !matches!(self, Format::Hevc | Format::Av1)
+        !matches!(self, Format::Hevc)
     }
     /// Sound without picture: Waveform Audio, AIFF, AAC Audio and FLAC.
     pub fn is_audio_only(self) -> bool {
         matches!(self, Format::Wav | Format::Aiff | Format::Aac | Format::Flac)
     }
-    /// H.264 or H.265: MPEG-4 (or QuickTime) with AAC audio, set up with the same bitrate controls.
+    /// H.264, H.265 or AV1: MPEG-4 or QuickTime with AAC audio.
     pub fn is_h26x(self) -> bool {
-        matches!(self, Format::H264 | Format::Hevc)
+        matches!(self, Format::H264 | Format::Hevc | Format::Av1)
     }
     /// A bitrate-controlled MPEG-4 video format with AAC audio: H.264, H.265 or AV1 (MPEG-4 only).
     pub fn is_mp4_video(self) -> bool {
@@ -267,7 +329,7 @@ impl Format {
     }
     /// Whether the file is MPEG-4 rather than QuickTime for `mux`.
     pub fn is_mp4_with(self, mux: Multiplexer) -> bool {
-        self == Format::Av1 || (self.is_h26x() && mux == Multiplexer::Mp4)
+        self.is_mp4_video() && mux == Multiplexer::Mp4
     }
     pub const ALL: [Format; 21] = [
         Format::H264,
@@ -308,6 +370,12 @@ pub enum H264Pass {
 #[serde(default, rename_all = "camelCase")]
 pub struct ExportSettings {
     pub format: Format,
+    /// AV1 bit depth and chroma subsampling. Unhandled formats use FFmpeg/libaom.
+    #[serde(default)]
+    pub av1_pixel_format: Av1PixelFormat,
+    /// Use full range instead of studio/limited levels for AV1 exports.
+    #[serde(default)]
+    pub av1_full_range: bool,
     pub path: String,
     /// Timeline range (default: In/Out if set, else the whole sequence).
     pub range: Option<TimeRange>,
@@ -550,6 +618,8 @@ impl Default for ExportSettings {
     fn default() -> Self {
         Self {
             format: Format::H264,
+            av1_pixel_format: Av1PixelFormat::default(),
+            av1_full_range: false,
             path: String::new(),
             range: None,
             scale: 1.0,
@@ -603,6 +673,9 @@ fn default_crf() -> f32 {
 impl ExportSettings {
     /// Reject settings the encoders cannot honour.
     pub fn validate(&self) -> Result<()> {
+        if self.multiplexer == settings::Multiplexer::Mkv && self.format != Format::Av1 {
+            return Err(ExportError::Unsupported("Matroska output is currently available for AV1 only".into()));
+        }
         if let Some(range) = self.range {
             validate_range(range)?;
         }
@@ -639,21 +712,16 @@ impl ExportSettings {
         if self.effects.image_overlay.enabled && self.effects.image_overlay.path.trim().is_empty() {
             return Err(ExportError::Unsupported("image overlay: no image file chosen".into()));
         }
-        if self.format == Format::Hevc && self.bitrate_mode == BitrateMode::Vbr2Pass {
-            return Err(ExportError::Unsupported("H.265 export has no two-pass mode: choose CBR or VBR, 1 pass".into()));
-        }
-        if self.format == Format::Av1 && self.bitrate_mode == BitrateMode::Vbr2Pass {
-            return Err(ExportError::Unsupported("AV1 export has no two-pass mode: choose CBR or VBR, 1 pass".into()));
+        if (self.format == Format::Hevc || self.format == Format::Av1) && self.bitrate_mode == BitrateMode::Vbr2Pass {
+            return Err(ExportError::Unsupported(format!("{} export has no two-pass mode: choose CBR or VBR, 1 pass", self.format.label())));
         }
         if self.bitrate_mode == BitrateMode::Crf {
             if self.format == Format::Hevc {
                 return Err(ExportError::Unsupported("H.265 export has no CRF mode: choose CBR or VBR, 1 pass".into()));
             }
-            if self.format == Format::Av1 {
-                return Err(ExportError::Unsupported("AV1 export has no CRF mode: choose CBR or VBR, 1 pass".into()));
-            }
-            if !self.crf.is_finite() || !(0.0..=51.0).contains(&self.crf) {
-                return Err(ExportError::Unsupported("CRF must be between 0 and 51".into()));
+            let upper = if self.format == Format::Av1 { 63.0 } else { 51.0 };
+            if !self.crf.is_finite() || !(0.0..=upper).contains(&self.crf) {
+                return Err(ExportError::Unsupported(format!("CRF must be between 0 and {}", upper as u32)));
             }
         }
         Ok(())
@@ -738,9 +806,22 @@ pub struct EncoderFrame<'a> {
 pub trait VideoEncoder: Send {
     /// MP4/MOV sample entry (codec config) — may only be complete after the first frame.
     fn sample_entry(&self) -> SampleEntry;
+    /// Hardware encoders may discover their validated codec header only after encoding.
+    /// The MP4 writer replaces the initial entry before finalizing the file.
+    fn final_sample_entry(&self) -> Result<Option<SampleEntry>> {
+        Ok(None)
+    }
     fn timescale(&self) -> u32;
     fn encode(&mut self, frame: &EncoderFrame) -> Result<Vec<EncodedPacket>>;
     fn flush(&mut self) -> Result<Vec<EncodedPacket>>;
+    /// Flush directly into the container, bounding peak RAM to one encoded packet.
+    /// Other encoders can keep returning their usual small delayed packet batches.
+    fn flush_into(&mut self, emit: &mut dyn FnMut(EncodedPacket) -> Result<()>) -> Result<()> {
+        for packet in self.flush()? {
+            emit(packet)?;
+        }
+        Ok(())
+    }
     /// Media start offset for an edit list (B-frame delay), in the encoder timescale.
     fn media_start(&self) -> Option<i64> {
         None
@@ -778,7 +859,7 @@ pub type AudioEncoderFactory = fn(format: Format, sample_rate: u32, channels: u3
 
 fn video_factories() -> &'static RwLock<Vec<EncoderFactory>> {
     static F: OnceLock<RwLock<Vec<EncoderFactory>>> = OnceLock::new();
-    F.get_or_init(|| RwLock::new(vec![h264_factory, prores_factory, dnx_factory, apv_factory, mjpeg_factory]))
+    F.get_or_init(|| RwLock::new(vec![h264_factory, av1_factory, prores_factory, dnx_factory, apv_factory, mjpeg_factory]))
 }
 fn audio_factories() -> &'static RwLock<Vec<AudioEncoderFactory>> {
     static F: OnceLock<RwLock<Vec<AudioEncoderFactory>>> = OnceLock::new();
@@ -1524,6 +1605,12 @@ impl VideoEncoder for H264Encoder {
         self.rate.num as u32
     }
     fn encode(&mut self, f: &EncoderFrame) -> Result<Vec<EncodedPacket>> {
+        if f.width != self.w || f.height != self.h {
+            return Err(ExportError::Unsupported(format!("software AV1 frame {}x{} does not match encoder {}x{}", f.width, f.height, self.w, self.h)));
+        }
+        if f.hdr.is_some() {
+            return Err(ExportError::Unsupported("software AV1 accepts only SDR frames; tone-map the source before encoding".into()));
+        }
         timed(Stage::Convert, || match f.hdr {
             Some(rgb) => {
                 let (kr, kb) = self.signal.kr_kb();
@@ -1577,6 +1664,54 @@ pub fn rgba_to_yuv420_8(rgba: &[u8], w: usize, h: usize, y: &mut Vec<u8>, u: &mu
             vr[cx] = (128.0 + 224.0 * vs[cx] / cnt[cx]).round().clamp(1.0, 254.0) as u8;
         }
     });
+}
+
+/// Convert an SDR RGBA8 picture directly to BT.709 limited-range 10-bit 4:2:0.
+///
+/// The RGB channels have 8-bit precision, but mixing them into YUV creates fractional
+/// code values. Quantizing YUV directly at 10 bits preserves those values better than
+/// converting to YUV8 then multiplying each code by four. Alpha is ignored.
+pub fn rgba_to_yuv420_10(rgba: &[u8], w: usize, h: usize, y: &mut Vec<u16>, u: &mut Vec<u16>, v: &mut Vec<u16>) -> Result<()> {
+    let bad = || ExportError::Encode(format!("a {w}x{h} SDR picture needs w*h*4 RGBA8 bytes, got {}", rgba.len()));
+    let pixels = w.checked_mul(h).ok_or_else(bad)?;
+    if w == 0 || h == 0 || pixels.checked_mul(4) != Some(rgba.len()) {
+        return Err(bad());
+    }
+    let row_pair = w.checked_mul(2).ok_or_else(bad)?;
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let (kr, kb) = (0.2126f32, 0.0722f32);
+    let (kg, sb, sr) = (1.0 - kr - kb, 2.0 * (1.0 - kb), 2.0 * (1.0 - kr));
+    let code = |value: f32| value.round().clamp(4.0, 1019.0) as u16;
+    y.clear();
+    y.resize(pixels, 0);
+    u.clear();
+    u.resize(cw * ch, 0);
+    v.clear();
+    v.resize(cw * ch, 0);
+    y.par_chunks_mut(row_pair).zip(u.par_chunks_mut(cw).zip(v.par_chunks_mut(cw))).enumerate().for_each(|(cy, (yr, (ur, vr)))| {
+        let mut us = vec![0.0f32; cw];
+        let mut vs = vec![0.0f32; cw];
+        let mut count = vec![0.0f32; cw];
+        for (dy, yrow) in yr.chunks_exact_mut(w).enumerate() {
+            let row = cy * 2 + dy;
+            let src = &rgba[row * w * 4..(row + 1) * w * 4];
+            for (x, destination) in yrow.iter_mut().enumerate() {
+                let i = x * 4;
+                let (r, g, b) = (f32::from(src[i]) / 255.0, f32::from(src[i + 1]) / 255.0, f32::from(src[i + 2]) / 255.0);
+                let lum = kr * r + kg * g + kb * b;
+                *destination = code(64.0 + 876.0 * lum);
+                us[x / 2] += (b - lum) / sb;
+                vs[x / 2] += (r - lum) / sr;
+                count[x / 2] += 1.0;
+            }
+        }
+        for (cx, (uo, vo)) in ur.iter_mut().zip(vr.iter_mut()).enumerate() {
+            let n = count[cx].max(1.0);
+            *uo = code(512.0 + 896.0 * us[cx] / n);
+            *vo = code(512.0 + 896.0 * vs[cx] / n);
+        }
+    });
+    Ok(())
 }
 
 /// Limited-range 8-bit 4:2:0 from encoded R'G'B' floats with matrix (Kr, Kb).
@@ -1716,6 +1851,133 @@ fn h264_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSetti
     Some(
         filmcraft_h264enc::Encoder::new(cfg)
             .map(|enc| Box::new(H264Encoder { enc, w, h, rate, y: Vec::new(), u: Vec::new(), v: Vec::new(), signal: s.signal }) as Box<dyn VideoEncoder>)
+            .map_err(|e| ExportError::Encode(e.to_string())),
+    )
+}
+
+/// AV1 Main (our pure-Rust encoder): sRGB/709 RGBA8 → 8-bit limited-range BT.709 4:2:0,
+/// length-prefixed / OBU samples with `av1C` in the sample entry.
+struct Av1Encoder {
+    enc: filmcraft_av1enc::Encoder,
+    w: u32,
+    h: u32,
+    rate: FrameRate,
+    y: Vec<u8>,
+    u: Vec<u8>,
+    v: Vec<u8>,
+    signal: ColorSignal,
+}
+
+impl Av1Encoder {
+    fn packets(&self, ps: Vec<filmcraft_av1enc::Packet>) -> Vec<EncodedPacket> {
+        let dur = self.rate.den.max(1) as u32;
+        ps.into_iter().map(|p| EncodedPacket { data: p.data, key: p.keyframe, duration: dur, composition_offset: 0 }).collect()
+    }
+}
+
+impl VideoEncoder for Av1Encoder {
+    fn sample_entry(&self) -> SampleEntry {
+        let av1c = filmcraft_isobmff::Av1Config {
+            seq_profile: 0,
+            seq_level_idx_0: self.enc.sequence_level_idx(),
+            seq_tier_0: false,
+            high_bitdepth: false,
+            twelve_bit: false,
+            monochrome: false,
+            chroma_subsampling_x: true,
+            chroma_subsampling_y: true,
+            chroma_sample_position: 0,
+            initial_presentation_delay_minus_one: None,
+            config_obus: self.enc.sequence_header_obu(),
+        };
+        let mut e = SampleEntry::av1(av1c, self.w as u16, self.h as u16);
+        self.signal.apply_to(&mut e, false);
+        e
+    }
+    fn timescale(&self) -> u32 {
+        self.rate.num.max(1) as u32
+    }
+    fn encode(&mut self, f: &EncoderFrame) -> Result<Vec<EncodedPacket>> {
+        if f.width != self.w || f.height != self.h {
+            return Err(ExportError::Unsupported(format!("software AV1 frame {}x{} does not match encoder {}x{}", f.width, f.height, self.w, self.h)));
+        }
+        if f.hdr.is_some() {
+            return Err(ExportError::Unsupported("software AV1 requires SDR input; tone-map HDR before encoding".into()));
+        }
+        let expected_len =
+            usize::try_from(self.w).ok().and_then(|w| usize::try_from(self.h).ok().and_then(|h| w.checked_mul(h))).and_then(|pixels| pixels.checked_mul(4));
+        if expected_len.is_none_or(|needed| f.rgba.len() < needed) {
+            return Err(ExportError::Unsupported("software AV1 RGBA input is shorter than the requested frame size".into()));
+        }
+        timed(Stage::Convert, || match f.hdr {
+            Some(rgb) => {
+                let (kr, kb) = self.signal.kr_kb();
+                rgbf_to_yuv420_8(rgb, f.width as usize, f.height as usize, kr, kb, &mut self.y, &mut self.u, &mut self.v)
+            }
+            None => rgba_to_yuv420_8(f.rgba, f.width as usize, f.height as usize, &mut self.y, &mut self.u, &mut self.v),
+        });
+        let cw = (f.width as usize).div_ceil(2);
+        let frame = filmcraft_av1enc::YuvFrame { y: &self.y, u: &self.u, v: &self.v, y_stride: f.width as usize, uv_stride: cw };
+        let pts = i64::try_from(f.index).unwrap_or(i64::MAX).saturating_mul(self.rate.den.max(1));
+        let p = self.enc.encode(&frame, pts).map_err(|e| ExportError::Encode(e.to_string()))?;
+        Ok(self.packets(vec![p]))
+    }
+    fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
+        let ps = self.enc.flush().map_err(|e| ExportError::Encode(e.to_string()))?;
+        Ok(self.packets(ps))
+    }
+}
+
+fn av1_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Result<Box<dyn VideoEncoder>>> {
+    if format != Format::Av1 {
+        return None;
+    }
+    // Independent libdav1d validation rejected native AV1 output on a real export.
+    // Do not send potentially invalid MP4/MOV streams to users just because they
+    // were previously only rejected for Matroska. libaom is the default for ALL
+    // software AV1 exports; keep native only as an explicitly requested diagnostic
+    // backend for its supported, 8-bit SDR MP4/MOV subset.
+    let native_opt_in = std::env::var("FILMCRAFT_EXPERIMENTAL_NATIVE_AV1").as_deref() == Ok("1");
+    if !native_opt_in || s.multiplexer == settings::Multiplexer::Mkv || s.av1_pixel_format != Av1PixelFormat::Yuv420p8 || s.av1_full_range {
+        return ffmpeg_av1::factory(format, w, h, rate, s);
+    }
+    native_av1_factory(format, w, h, rate, s)
+}
+
+fn native_av1_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Result<Box<dyn VideoEncoder>>> {
+    if format != Format::Av1 {
+        return None;
+    }
+    // The experimental native encoder accepts only BT.709 SDR 8-bit 4:2:0.
+    // Never silently export 8-bit pixels carrying PQ/HLG tags as HDR.
+    if s.signal.is_hdr() || s.signal != ColorSignal::default() {
+        return Some(Err(ExportError::Unsupported(
+            "software AV1 supports 8-bit BT.709 SDR only; select a compatible HDR hardware encoder or export SDR".into(),
+        )));
+    }
+    let (Ok(num), Ok(den)) = (u32::try_from(rate.num), u32::try_from(rate.den)) else {
+        return Some(Err(ExportError::Unsupported("software AV1 frame rate exceeds the supported range".into())));
+    };
+    if num == 0 || den == 0 {
+        return Some(Err(ExportError::Unsupported("software AV1 requires a positive frame rate".into())));
+    }
+    let mut cfg = filmcraft_av1enc::EncoderConfig::new(w, h, num, den);
+    let keyint = s.keyframe_distance.filter(|k| *k > 0).unwrap_or_else(|| ((rate.num as f64 / rate.den.max(1) as f64) * 2.0).round().max(1.0) as u32);
+    cfg.key_int = keyint.max(1);
+    let kbps = s.bitrate_kbps.max(100);
+    let max = s.max_bitrate_kbps.filter(|m| *m >= kbps).unwrap_or_else(|| (u64::from(kbps) * 3 / 2).min(u64::from(u32::MAX)) as u32);
+    cfg.rate_control = match s.bitrate_mode {
+        BitrateMode::Cbr => Some(filmcraft_av1enc::RateControl::Cbr { kbps }),
+        BitrateMode::Crf => {
+            let crf = if s.crf.is_finite() { s.crf } else { DEFAULT_CRF };
+            Some(filmcraft_av1enc::RateControl::ConstantQuality(crf))
+        }
+        _ => Some(filmcraft_av1enc::RateControl::Vbr { target_kbps: kbps, max_kbps: max }),
+    };
+    cfg.spatial_aq = true;
+    Some(
+        filmcraft_av1enc::Encoder::new(cfg)
+            .map(|enc| Box::new(Av1Encoder { enc, w, h, rate, y: Vec::new(), u: Vec::new(), v: Vec::new(), signal: s.signal }) as Box<dyn VideoEncoder>)
             .map_err(|e| ExportError::Encode(e.to_string())),
     )
 }

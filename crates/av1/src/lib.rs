@@ -14,6 +14,7 @@ mod decoder;
 mod frame;
 mod grain;
 pub mod header;
+mod inspect;
 mod inter;
 mod inter_info;
 mod intra;
@@ -30,6 +31,7 @@ mod transform;
 
 pub use decoder::Decoder;
 pub use header::{ColorConfig, FrameHeader, SequenceHeader};
+pub use inspect::{IndependentFrameInfo, independent_frame_header_info};
 pub use stats::{DecodeStats, Stage};
 
 /// Decoder errors.
@@ -41,6 +43,8 @@ pub enum Error {
     Invalid(&'static str),
     #[error("unsupported AV1 feature: {0}")]
     Unsupported(&'static str),
+    #[error("AV1 buffer allocation failed")]
+    AllocationFailed,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

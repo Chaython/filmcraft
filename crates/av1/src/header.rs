@@ -40,6 +40,9 @@ pub struct SequenceHeader {
     pub operating_points_cnt_minus_1: usize,
     pub operating_point_idc: [u32; 32],
     pub seq_level_idx: [u8; 32],
+    /// High tier for operating points with sequence level 4.0 (index 8) or greater.
+    /// Lower-level operating points always use Main Tier.
+    pub seq_tier: [bool; 32],
     pub decoder_model_present_for_this_op: [bool; 32],
     /// OperatingPointIdc of the chosen operating point (0).
     pub op_idc: u32,
@@ -73,6 +76,32 @@ pub struct SequenceHeader {
 impl SequenceHeader {
     pub fn parse(data: &[u8]) -> Result<SequenceHeader> {
         let mut r = BitReader::new(data);
+        Self::parse_bits(&mut r)
+    }
+
+    /// Parse a bounded sequence OBU payload, including its required trailing bits (5.3.4).
+    /// The ordinary decoder parser remains tolerant of trailing bits for existing callers.
+    pub fn parse_checked(data: &[u8]) -> Result<SequenceHeader> {
+        if data.len() > 65_536 {
+            return Err(Error::Unsupported("sequence header exceeds 64 KiB inspection limit"));
+        }
+        let mut r = BitReader::new(data);
+        let h = Self::parse_bits(&mut r)?;
+        if !r.flag()? {
+            return Err(Error::Invalid("sequence trailing_one_bit"));
+        }
+        while r.position() < data.len().saturating_mul(8) {
+            if r.flag()? {
+                return Err(Error::Invalid("sequence trailing_zero_bit"));
+            }
+        }
+        if h.reduced_still_picture_header && !h.still_picture {
+            return Err(Error::Invalid("reduced still header without still_picture"));
+        }
+        Ok(h)
+    }
+
+    fn parse_bits(r: &mut BitReader) -> Result<SequenceHeader> {
         let mut s = SequenceHeader { profile: r.f(3)? as u8, ..Default::default() };
         if s.profile > 2 {
             return Err(Error::Unsupported("seq_profile > 2"));
@@ -105,7 +134,7 @@ impl SequenceHeader {
                 s.operating_point_idc[i] = r.f(12)?;
                 s.seq_level_idx[i] = r.f(5)? as u8;
                 if s.seq_level_idx[i] > 7 {
-                    r.f(1)?; // seq_tier
+                    s.seq_tier[i] = r.flag()?;
                 }
                 if s.decoder_model_info_present {
                     s.decoder_model_present_for_this_op[i] = r.flag()?;
@@ -160,7 +189,7 @@ impl SequenceHeader {
         s.enable_superres = r.flag()?;
         s.enable_cdef = r.flag()?;
         s.enable_restoration = r.flag()?;
-        s.color = parse_color_config(&mut r, s.profile)?;
+        s.color = parse_color_config(r, s.profile)?;
         s.film_grain_params_present = r.flag()?;
         Ok(s)
     }
@@ -856,6 +885,12 @@ impl FrameHeader {
         let t = &mut self.tile_info;
         t.mi_col_starts.clear();
         t.mi_row_starts.clear();
+        // At most one start per superblock plus the final boundary. Reserve fallibly before
+        // parsing either layout so header inspection never relies on an infallible Vec growth.
+        let columns = usize::try_from(sb_cols).ok().and_then(|n| n.checked_add(1)).ok_or(Error::Invalid("tile column count"))?;
+        let rows = usize::try_from(sb_rows).ok().and_then(|n| n.checked_add(1)).ok_or(Error::Invalid("tile row count"))?;
+        t.mi_col_starts.try_reserve(columns).map_err(|_| Error::Invalid("tile column allocation failed"))?;
+        t.mi_row_starts.try_reserve(rows).map_err(|_| Error::Invalid("tile row allocation failed"))?;
         if r.flag()? {
             t.cols_log2 = min_log2_tile_cols;
             while t.cols_log2 < max_log2_tile_cols {

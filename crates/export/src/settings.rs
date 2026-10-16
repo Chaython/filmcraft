@@ -126,6 +126,8 @@ pub enum Multiplexer {
     Mp4,
     /// QuickTime.
     Mov,
+    /// Matroska (AV1 video, optionally with AAC/FLAC/PCM audio).
+    Mkv,
 }
 
 /// Video codec of an MXF export.
@@ -591,7 +593,11 @@ impl ExportSettings {
 
     /// File extension of the output.
     pub fn extension(&self) -> &'static str {
-        if self.format.is_h26x() && self.multiplexer == Multiplexer::Mov { "mov" } else { self.format.extension() }
+        match (self.format, self.multiplexer) {
+            (Format::Av1, Multiplexer::Mkv) => "mkv",
+            (f, Multiplexer::Mov) if f.is_h26x() => "mov",
+            _ => self.format.extension(),
+        }
     }
 
     /// Estimated output size in bytes for `duration` of a sequence (`seq_w`×`seq_h` at `seq_rate`).
@@ -699,9 +705,21 @@ impl ExportSettings {
                     v += &format!(", keyframe every {} frames", r.keyint);
                 }
                 Format::Av1 => {
-                    v += &format!(", AV1 Main (hardware encoder), {}", self.bitrate_mode.label());
+                    let encoder = if self.hardware_encoding == HardwareEncoding::Off || self.bitrate_mode == BitrateMode::Crf {
+                        "libaom-av1 software (FFmpeg)"
+                    } else {
+                        "hardware Auto (libaom-av1 fallback)"
+                    };
+                    v += &format!(
+                        ", AV1 {}, {}, {} range, {}",
+                        self.av1_pixel_format.label(),
+                        encoder,
+                        if self.av1_full_range { "full" } else { "limited" },
+                        self.bitrate_mode.label()
+                    );
                     v += &match self.bitrate_mode {
                         BitrateMode::Cbr => format!(", {}", mbps(r.target_kbps)),
+                        BitrateMode::Crf => format!(" {}", self.crf),
                         _ => format!(", Target {}, Max {}", mbps(r.target_kbps), mbps(r.max_kbps)),
                     };
                     v += &format!(", keyframe every {} frames", r.keyint);
@@ -752,7 +770,8 @@ impl ExportSettings {
             "No audio".to_string()
         };
         let container = match self.format {
-            Format::H264 | Format::Hevc if self.multiplexer == Multiplexer::Mov => "QuickTime",
+            Format::Av1 if self.multiplexer == Multiplexer::Mkv => "Matroska",
+            Format::H264 | Format::Hevc | Format::Av1 if self.multiplexer == Multiplexer::Mov => "QuickTime",
             Format::H264 | Format::Hevc | Format::Av1 => "MP4",
             Format::ProRes | Format::DnxHr | Format::Apv | Format::Mjpeg => "QuickTime",
             Format::MxfOp1a | Format::MxfOpAtom => self.mxf_video_codec.label(),

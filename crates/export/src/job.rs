@@ -70,6 +70,7 @@ use filmcraft_time::FrameRate;
 use rayon::prelude::*;
 
 use crate::audio_out::AudioOut;
+use crate::mkv_out::{self, PendingMkv};
 use crate::mxf_out::{MxfMux, MxfSetup};
 use crate::pipeline::Pipeline;
 use crate::settings::{AudioCodec, BitrateMode};
@@ -177,6 +178,8 @@ pub struct Exporter {
     mux: Option<Mp4Writer<Out>>,
     /// MXF exports write through this instead of `mux`.
     mxf: Option<MxfMux>,
+    /// Disk-backed, lossless AV1/AAC/FLAC/PCM remux from completed MP4 into MKV.
+    mkv: Option<PendingMkv>,
     seq: ItemId,
     project: Arc<Project>,
     vt: usize,
@@ -193,13 +196,32 @@ pub fn stepped(format: Format) -> bool {
 }
 
 /// Whether an export is HDR: an HDR working space, SDR not asked for, and a format whose encoder
-/// writes HDR (`hdr_available` says so for H.265, which has no built-in encoder).
+/// writes HDR (`hdr_available` says so for H.265 and AV1, which have no built-in encoder).
+/// AV1 CRF and Hardware Encoding Off select the 8-bit BT.709 software path.
+pub(crate) fn av1_software_sdr(s: &ExportSettings) -> bool {
+    s.video_format() == Format::Av1
+        && s.av1_pixel_format == crate::Av1PixelFormat::Yuv420p8
+        && (s.hardware_encoding == crate::HardwareEncoding::Off || s.bitrate_mode == crate::BitrateMode::Crf)
+}
+
+/// The requested 8-bit AV1 profile must be SDR, even on an HDR Main10 GPU.
+pub(crate) fn av1_requires_sdr(s: &ExportSettings) -> bool {
+    s.video_format() == Format::Av1 && (s.av1_pixel_format.bit_depth() < 10 || av1_software_sdr(s))
+}
+
+/// Request encoded RGB floats for 10/12-bit SDR AV1 regardless of whether
+/// source color is Rec.709 or HDR tone-mapped to SDR. Color signaling is selected
+/// independently; high-precision SDR must never be mislabeled as PQ/HLG.
+pub(crate) fn av1_sdr_float(settings: &ExportSettings, hdr_encoded: bool) -> bool {
+    settings.video_format() == Format::Av1 && settings.av1_pixel_format.bit_depth() >= 10 && !hdr_encoded
+}
+
 pub(crate) fn hdr_output(working_hdr: bool, sdr: bool, format: Format, hdr_available: impl Fn(Format) -> bool) -> bool {
     working_hdr
         && !sdr
         && match format {
             Format::H264 | Format::ProRes | Format::DnxHr | Format::Apv => true,
-            Format::Hevc => hdr_available(Format::Hevc),
+            Format::Hevc | Format::Av1 => hdr_available(format),
             _ => false,
         }
 }
@@ -224,11 +246,16 @@ impl Exporter {
             return Err(ExportError::Unsupported(format!("{} is not a stepped export", settings.format.label())));
         }
         settings.validate()?;
+        if settings.format == Format::Av1 && settings.multiplexer == crate::settings::Multiplexer::Mkv {
+            mkv_out::preflight()?;
+        }
         let q = project.sequence(seq).ok_or(ExportError::NoSequence)?;
         // HDR sequences export HDR (H.264 / ProRes / DNxHR / APV, and H.265 where a registered encoder
         // writes Main 10) unless SDR is asked for; elsewhere H.265 is tone-mapped 8-bit SDR
         let pipe = q.settings.color;
-        let hdr_out = hdr_output(pipe.working.is_hdr(), settings.sdr, settings.video_format(), crate::hdr_available);
+        let hdr_out = hdr_output(pipe.working.is_hdr(), settings.sdr || av1_requires_sdr(settings), settings.video_format(), |format| {
+            crate::hdr_available(format) || (format == Format::Av1 && settings.av1_pixel_format.bit_depth() >= 10)
+        });
         let mut settings = settings.clone();
         settings.signal = match (hdr_out, pipe.working) {
             (true, filmcraft_color::WorkingSpace::Rec2100Pq) => ColorSignal::PQ,
@@ -244,7 +271,11 @@ impl Exporter {
         let two_pass = settings.video_format() == Format::H264 && settings.bitrate_mode == BitrateMode::Vbr2Pass;
         settings.h264_pass = if two_pass { H264Pass::First } else { H264Pass::Single };
         let range = export_range(&project, seq, &settings)?;
-        let pipe = Arc::new(Pipeline::new(project.clone(), seq, &settings, hdr_out)?);
+        // The output's color signal follows the *actual* HDR decision above.
+        // Float precision is separate: SDR Main10 / Professional AV1 should not
+        // be rounded to RGBA8 before its 10/12-bit YUV encoder can see it.
+        let high_precision_frames = hdr_out || av1_sdr_float(&settings, hdr_out);
+        let pipe = Arc::new(Pipeline::new(project.clone(), seq, &settings, high_precision_frames)?);
         let (f0, f1) = frame_span(pipe.rate, range);
         let nframes = (f1 - f0) as u64;
         if !settings.part_of_batch {
@@ -283,6 +314,7 @@ impl Exporter {
             queued: Vec::new(),
             mux: None,
             mxf: None,
+            mkv: None,
             seq,
             project: project.clone(),
             vt: 0,
@@ -406,7 +438,13 @@ impl Exporter {
             })?);
             return Ok(());
         }
-        let file = Out::create(&self.settings)?;
+        let file = if self.settings.format == Format::Av1 && self.settings.multiplexer == crate::settings::Multiplexer::Mkv {
+            let (mkv, out) = mkv_out::begin(&self.settings)?;
+            self.mkv = Some(mkv);
+            out
+        } else {
+            Out::create(&self.settings)?
+        };
         let mut opts = WriterOptions::new(self.brand);
         opts.metadata = self.settings.metadata.udta();
         let mut mux = Mp4Writer::new(file, opts).map_err(|e| ExportError::Io(e.to_string()))?;
@@ -483,9 +521,24 @@ impl Exporter {
         if self.mux.is_none() && self.mxf.is_none() {
             self.open_mux()?;
         }
-        let mut tail = std::mem::take(&mut self.queued);
-        tail.extend(self.venc.flush()?);
-        self.write_video(tail)?;
+        let queued = std::mem::take(&mut self.queued);
+        self.write_video(queued)?;
+        // libaom encodes the spooled frames during flush. Stream the resulting
+        // packets into the already-open muxer instead of accumulating gigabytes
+        // of AV1 temporal units in one Vec before writing the container.
+        let vt = self.vt;
+        let (mux, mxf) = (&mut self.mux, &mut self.mxf);
+        self.venc.flush_into(&mut |packet| {
+            if let Some(m) = mxf.as_mut() {
+                return m.write_video(vec![packet]);
+            }
+            let mux = mux.as_mut().ok_or_else(|| ExportError::Encode("internal: missing container during video flush".into()))?;
+            mux.write_sample(
+                vt,
+                WriteSample { data: &packet.data, duration: packet.duration, composition_offset: packet.composition_offset, is_sync: packet.key },
+            )
+            .map_err(|e| ExportError::Io(e.to_string()))
+        })?;
         self.write_audio(mixed)?;
         if let (Some(at), Some(a)) = (self.at, self.aenc.as_mut()) {
             let mux = self.mux.as_mut().ok_or_else(|| ExportError::Encode("internal: the container writer was not created".into()))?;
@@ -496,6 +549,11 @@ impl Exporter {
                 mux.set_sample_entry(at, entry).map_err(|e| ExportError::Io(e.to_string()))?;
             }
         }
+        if let Some(entry) = self.venc.final_sample_entry()?
+            && let Some(mux) = self.mux.as_mut()
+        {
+            mux.set_sample_entry(self.vt, entry).map_err(|e| ExportError::Io(e.to_string()))?;
+        }
         let (bytes, extra_files) = match self.mxf.take() {
             Some(m) => m.finish(&self.settings)?,
             None => {
@@ -505,7 +563,8 @@ impl Exporter {
                     .ok_or_else(|| ExportError::Encode("internal: the container writer was not created".into()))?
                     .finish()
                     .map_err(|e| ExportError::Io(e.to_string()))?;
-                (w.finish(&self.settings)?, Vec::new())
+                let bytes = if let Some(mkv) = self.mkv.as_ref() { mkv_out::finish(w, &self.settings, mkv)? } else { w.finish(&self.settings)? };
+                (bytes, Vec::new())
             }
         };
         note_stage(Stage::Finish, finishing.elapsed());

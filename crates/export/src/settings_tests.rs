@@ -912,7 +912,21 @@ fn a_time_left_reads_like_a_clock() {
 }
 
 #[test]
-fn av1_is_an_mp4_format_that_needs_a_registered_encoder() {
+fn av1_crf_allows_full_libaom_quality_range() {
+    for crf in [0.0, 23.0, 51.0, 63.0] {
+        let s = ExportSettings { format: Format::Av1, bitrate_mode: BitrateMode::Crf, crf, ..Default::default() };
+        assert!(s.validate().is_ok(), "AV1/libaom supports CRF {crf}");
+    }
+    for crf in [-0.1, 63.1, f32::NAN, f32::INFINITY] {
+        let s = ExportSettings { format: Format::Av1, bitrate_mode: BitrateMode::Crf, crf, ..Default::default() };
+        assert!(s.validate().is_err(), "invalid AV1 CRF {crf} must be rejected");
+    }
+    let h264 = ExportSettings { format: Format::H264, bitrate_mode: BitrateMode::Crf, crf: 63.0, ..Default::default() };
+    assert!(h264.validate().is_err(), "H.264 must retain its narrower quality range");
+}
+
+#[test]
+fn av1_is_an_mp4_format_with_builtin_encoder() {
     for name in ["av1", "AV1", "av01"] {
         assert_eq!(Format::from_name(name), Some(Format::Av1), "{name}");
     }
@@ -922,26 +936,301 @@ fn av1_is_an_mp4_format_that_needs_a_registered_encoder() {
     let s: ExportSettings = serde_json::from_value(serde_json::json!({"format": "av1"})).unwrap();
     assert_eq!(s.format, Format::Av1);
     assert_eq!(serde_json::to_value(&s).unwrap()["format"], "av1");
-    // MP4 with AAC only: a QuickTime multiplexer setting left over from H.264 does not apply
+    // AV1 exports use MP4 by default, but MOV remains supported by the NVENC export path.
+    // Preserve the selected container rather than silently renaming MOV output to MP4.
     let a = ExportSettings { format: Format::Av1, ..Default::default() };
     assert_eq!((a.audio_codec(), a.extension()), (AudioCodec::Aac, "mp4"));
     let mov = ExportSettings { multiplexer: Multiplexer::Mov, ..a.clone() };
-    assert_eq!((mov.audio_codec(), mov.extension()), (AudioCodec::Aac, "mp4"));
+    assert_eq!((mov.audio_codec(), mov.extension()), (AudioCodec::Aac, "mov"));
+    let mkv = ExportSettings { multiplexer: Multiplexer::Mkv, ..a.clone() };
+    assert_eq!((mkv.audio_codec(), mkv.extension()), (AudioCodec::Aac, "mkv"));
+    assert_eq!(mkv.summary(1920, 1088, FrameRate::FPS_25, 48_000, Tick(10 * TICKS_PER_SECOND)).format, "AV1 (Matroska)");
+    let bad = ExportSettings { format: Format::H264, ..mkv };
+    assert!(bad.validate().unwrap_err().to_string().contains("AV1 only"));
+
     let b = a.estimate_bytes(1920, 1088, FrameRate::FPS_25, 48_000, Tick(10 * TICKS_PER_SECOND));
     assert!((b as f64 - 25.4e6).abs() < 0.2e6, "{b}");
     let summary = a.summary(1920, 1088, FrameRate::FPS_25, 48_000, Tick(10 * TICKS_PER_SECOND));
     assert_eq!(summary.format, "AV1 (MP4)");
-    assert!(summary.video.contains("AV1 Main"), "{}", summary.video);
+    assert!(summary.video.contains("AV1 8-bit 4:2:0"), "{}", summary.video);
+    assert!(summary.video.contains("limited range"), "{}", summary.video);
     let e = ExportSettings { bitrate_mode: BitrateMode::Vbr2Pass, ..a.clone() }.validate().unwrap_err();
     assert!(e.to_string().contains("two-pass"), "{e}");
-    let e = ExportSettings { bitrate_mode: BitrateMode::Crf, ..a.clone() }.validate().unwrap_err();
-    assert!(e.to_string().contains("no CRF mode"), "{e}");
-    assert!(!Format::Av1.has_builtin_encoder());
-    assert!(!available(Format::Av1), "nothing registered an encoder for it");
+    assert!(Format::Av1.has_builtin_encoder());
+    assert!(available(Format::Av1), "AV1 has a built-in software encoder");
+    // Default software AV1 is libaom for MP4 and MOV as well as MKV. Require
+    // independent libdav1d decoding so invalid native bitstreams cannot regress
+    // back into regular exports without failing Linux CI.
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|v| !v.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    let available_ffmpeg = std::process::Command::new(&ffmpeg).arg("-version").output().is_ok_and(|r| r.status.success());
+    if !available_ffmpeg {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "Linux AV1 CI must supply libaom and libdav1d");
+        return;
+    }
     let (p, seq, m) = matte([0.0, 0.0, 1.0, 1.0], 160, 96, None);
-    let sc = Scratch::new("av1-missing");
-    let err = export(&p, seq, &ExportSettings { path: sc.path("x.mp4"), include_audio: false, ..a.clone() }, &m, &Progress::default()).unwrap_err().to_string();
-    assert!(err.contains("AV1") && err.contains("encoder not available"), "{err}");
+    let sc = Scratch::new("av1-export");
+    for (multiplexer, filename) in [(Multiplexer::Mp4, "x.mp4"), (Multiplexer::Mov, "x.mov")] {
+        let out_path = sc.path(filename);
+        let mut exp_settings = ExportSettings { multiplexer, path: out_path.clone(), include_audio: false, ..a.clone() };
+        exp_settings.range = Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(3)));
+        let report = export(&p, seq, &exp_settings, &m, &Progress::default()).expect("conformant software AV1 export");
+        assert_eq!(report.frames, 3);
+        let mp4_data = std::fs::read(&out_path).unwrap();
+        assert!(!mp4_data.is_empty());
+        let mp4 = filmcraft_isobmff::open(&mp4_data).unwrap();
+        assert_eq!(mp4.tracks.len(), 1);
+        assert_eq!(mp4.tracks[0].samples.len(), 3);
+        let decoded = std::process::Command::new(&ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+            .arg(&out_path)
+            .args(["-pix_fmt", "yuv420p", "-f", "rawvideo", "-"])
+            .output()
+            .expect("independent AV1 decoder");
+        assert!(decoded.status.success(), "{filename}: libdav1d rejected AV1 output: {}", String::from_utf8_lossy(&decoded.stderr));
+        assert_eq!(decoded.stdout.len(), (160 * 96 * 3 / 2) * 3, "{filename}: wrong number of decoded 4:2:0 frames");
+    }
+}
+
+#[test]
+fn av1_mkv_muxer_preserves_video_and_aac_without_transcoding() {
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "MKV integration requires FFmpeg in Linux CI");
+        return;
+    }
+    let (p, seq, sources) = matte([0.15, 0.35, 0.7, 1.0], 160, 96, Some(-12.0));
+    let dir = Scratch::new("av1-mkv-export");
+    let path = dir.path("result.mkv");
+    let settings = ExportSettings {
+        format: Format::Av1,
+        multiplexer: Multiplexer::Mkv,
+        path: path.clone(),
+        include_audio: true,
+        range: Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(4))),
+        ..Default::default()
+    };
+    assert_eq!(settings.extension(), "mkv");
+    assert_eq!(settings.summary(160, 96, FrameRate::FPS_24, 48_000, Tick(TICKS_PER_SECOND)).format, "AV1 (Matroska)");
+    let report = export(&p, seq, &settings, &sources, &Progress::default()).expect("AV1 Matroska export");
+    assert_eq!(report.frames, 4);
+    let bytes = std::fs::read(&path).expect("written Matroska file");
+    assert!(bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]), "must be EBML/Matroska and not a renamed MP4");
+    assert_eq!(report.bytes, bytes.len() as u64);
+    let probe = ffprobe_json(&["-show_entries", "stream=codec_name,codec_type:format=format_name"], &path).expect("ffprobe AV1 Matroska file");
+    let streams = probe["streams"].as_array().expect("Matroska streams");
+    assert!(streams.iter().any(|stream| stream["codec_name"] == "av1" && stream["codec_type"] == "video"), "AV1 video missing: {probe}");
+    assert!(streams.iter().any(|stream| stream["codec_name"] == "aac" && stream["codec_type"] == "audio"), "AAC soundtrack missing: {probe}");
+    let result = std::process::Command::new(ffmpeg)
+        .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+        .arg(&path)
+        .args(["-map", "0", "-f", "null", "-"])
+        .output()
+        .expect("independent MKV decoder");
+    assert!(result.status.success(), "libdav1d/AAC decode failed: {}", String::from_utf8_lossy(&result.stderr));
+}
+
+#[test]
+fn av1_mkv_high_bitdepth_444_roundtrip() {
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "FFmpeg is required for 12-bit MKV CI");
+        return;
+    }
+    let (p, seq, sources) = matte([0.2, 0.7, 0.4, 1.0], 160, 96, None);
+    let temp = Scratch::new("av1-mkv-444");
+    let path = temp.path("professional-12bit.mkv");
+    let settings = ExportSettings {
+        format: Format::Av1,
+        multiplexer: Multiplexer::Mkv,
+        av1_pixel_format: Av1PixelFormat::Yuv444p12,
+        bitrate_mode: BitrateMode::Crf,
+        crf: 35.0,
+        include_audio: false,
+        path: path.clone(),
+        range: Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(3))),
+        ..Default::default()
+    };
+    let result = export(&p, seq, &settings, &sources, &Progress::default()).expect("12-bit AV1 MKV export");
+    assert_eq!(result.frames, 3);
+    let probe =
+        ffprobe_json(&["-show_entries", "stream=codec_name,codec_type,pix_fmt,color_primaries,color_transfer"], &path).expect("ffprobe 12-bit Matroska");
+    let video = &probe["streams"][0];
+    assert_eq!(video["codec_name"], "av1", "Matroska must contain AV1");
+    assert_eq!(video["pix_fmt"], "yuv444p12le", "Matroska must retain the 12-bit 4:4:4 AV1 profile");
+    assert_eq!(video["color_primaries"], "bt709", "High-bit-depth SDR must retain BT.709 and never masquerade as HDR");
+    assert_eq!(video["color_transfer"], "bt709", "High-bit-depth SDR must retain SDR transfer metadata");
+    let decoded = std::process::Command::new(ffmpeg)
+        .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+        .arg(&path)
+        .args(["-f", "null", "-"])
+        .output()
+        .expect("decode 12-bit MKV");
+    assert!(decoded.status.success(), "12-bit MKV libdav1d decode failed: {}", String::from_utf8_lossy(&decoded.stderr));
+}
+
+#[test]
+fn av1_mkv_flac_and_pcm_audio_tracks_roundtrip() {
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "FFmpeg is required for MKV FLAC/PCM tests");
+        return;
+    }
+    let (project, seq, sources) = matte([0.1, 0.6, 0.3, 1.0], 128, 96, Some(-9.0));
+    let dir = Scratch::new("av1-mkv-audio-formats");
+    for (codec, bits, name, expected) in [(AudioCodec::Flac, 24, "flac.mkv", "flac"), (AudioCodec::Pcm, 16, "pcm.mkv", "pcm_s16le")] {
+        let path = dir.path(name);
+        let settings = ExportSettings {
+            format: Format::Av1,
+            multiplexer: Multiplexer::Mkv,
+            hardware_encoding: HardwareEncoding::Off,
+            bitrate_mode: BitrateMode::Crf,
+            crf: 35.0,
+            include_audio: true,
+            audio: AudioSettings { codec, bits, ..Default::default() },
+            path: path.clone(),
+            range: Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(3))),
+            ..Default::default()
+        };
+        export(&project, seq, &settings, &sources, &Progress::default()).expect("AV1 + lossless audio MKV export");
+        let probe = ffprobe_json(&["-show_entries", "stream=codec_name,codec_type"], &path).expect("inspect Matroska audio codec");
+        let streams = probe["streams"].as_array().expect("video and audio streams");
+        assert!(streams.iter().any(|stream| stream["codec_name"] == "av1"), "{name}: no video: {probe}");
+        assert!(streams.iter().any(|stream| stream["codec_name"] == expected && stream["codec_type"] == "audio"), "{name}: wrong audio mapping: {probe}");
+        let decode = std::process::Command::new(&ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+            .arg(&path)
+            .args(["-map", "0", "-f", "null", "-"])
+            .output()
+            .expect("decode Matroska video and lossless soundtrack");
+        assert!(decode.status.success(), "{name}: audio/video decode failure: {}", String::from_utf8_lossy(&decode.stderr));
+    }
+    let files = files_in(&dir.0);
+    assert_eq!(files, ["flac.mkv", "pcm.mkv"], "completed MKV jobs must leave neither staging MP4s nor backup files");
+}
+
+#[test]
+fn av1_mkv_pq_and_hlg_colour_metadata_survives_remux() {
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "AV1 HDR Matroska CI requires FFmpeg");
+        return;
+    }
+    let info = [
+        (filmcraft_color::WorkingSpace::Rec2100Pq, Av1PixelFormat::Yuv420p10, false, "smpte2084", "tv"),
+        (filmcraft_color::WorkingSpace::Rec2100Hlg, Av1PixelFormat::Yuv444p12, true, "arib-std-b67", "pc"),
+    ];
+    for (space, pixel_format, full_range, transfer, range) in info {
+        let (mut project, seq, sources) = matte([0.3, 0.5, 0.8, 1.0], 160, 96, None);
+        let project_ref = Arc::get_mut(&mut project).expect("unique test project");
+        project_ref.sequence_mut(seq).expect("HDR sequence").settings.color.working = space;
+        let dir = Scratch::new(&format!("av1-mkv-hdr-{}", space.id()));
+        let path = dir.path("hdr.mkv");
+        let settings = ExportSettings {
+            format: Format::Av1,
+            multiplexer: Multiplexer::Mkv,
+            av1_pixel_format: pixel_format,
+            av1_full_range: full_range,
+            bitrate_mode: BitrateMode::Crf,
+            hardware_encoding: HardwareEncoding::Off,
+            crf: 35.0,
+            include_audio: false,
+            path: path.clone(),
+            range: Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(2))),
+            ..Default::default()
+        };
+        export(&project, seq, &settings, &sources, &Progress::default()).expect("HDR AV1 MKV export");
+        let fields = ["-show_entries", "stream=codec_name,pix_fmt,color_space,color_primaries,color_transfer,color_range"];
+        let probe = ffprobe_json(&fields, &path).expect("probe HDR Matroska");
+        let video = &probe["streams"][0];
+        assert_eq!(video["codec_name"], "av1", "{space:?}: {probe}");
+        assert_eq!(video["color_space"], "bt2020nc", "{space:?}: Matroska lost BT.2020 matrix: {probe}");
+        assert_eq!(video["color_primaries"], "bt2020", "{space:?}: Matroska lost BT.2020 primaries: {probe}");
+        assert_eq!(video["color_transfer"], transfer, "{space:?}: Matroska lost PQ/HLG: {probe}");
+        assert_eq!(video["color_range"], range, "{space:?}: Matroska lost the requested range: {probe}");
+        assert_eq!(video["pix_fmt"], pixel_format.ffmpeg_name(), "{space:?}: Matroska changed bit depth or chroma: {probe}");
+        let decoded = std::process::Command::new(&ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+            .arg(&path)
+            .args(["-f", "null", "-"])
+            .output()
+            .expect("independent HDR MKV decoder");
+        assert!(decoded.status.success(), "{space:?}: independent HDR MKV decoding failed: {}", String::from_utf8_lossy(&decoded.stderr));
+    }
+}
+
+#[test]
+fn av1_mkv_hdr_to_sdr_main10_preserves_rec709_metadata() {
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "HDR to SDR AV1 test requires FFmpeg");
+        return;
+    }
+    let (mut project, seq, sources) = matte([0.2, 0.5, 0.8, 1.0], 160, 96, None);
+    Arc::get_mut(&mut project).expect("unique HDR project").sequence_mut(seq).unwrap().settings.color.working = filmcraft_color::WorkingSpace::Rec2100Pq;
+    let temp = Scratch::new("av1-hdr-to-sdr-main10");
+    let path = temp.path("rec709-sdr.mkv");
+    let settings = ExportSettings {
+        format: Format::Av1,
+        multiplexer: Multiplexer::Mkv,
+        av1_pixel_format: Av1PixelFormat::Yuv420p10,
+        bitrate_mode: BitrateMode::Crf,
+        crf: 35.0,
+        sdr: true,
+        include_audio: false,
+        path: path.clone(),
+        range: Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(2))),
+        ..Default::default()
+    };
+    export(&project, seq, &settings, &sources, &Progress::default()).expect("tone-map HDR to 10-bit SDR");
+    let probe = ffprobe_json(&["-show_entries", "stream=codec_name,pix_fmt,color_primaries,color_transfer,color_space"], &path).expect("probe output");
+    let video = &probe["streams"][0];
+    assert_eq!(video["codec_name"], "av1");
+    assert_eq!(video["pix_fmt"], "yuv420p10le", "tone-mapped 10-bit SDR should not drop to 8-bit");
+    assert_eq!(video["color_primaries"], "bt709", "tone-mapped output must be BT.709 SDR");
+    assert_eq!(video["color_transfer"], "bt709", "tone-mapped output must not retain PQ");
+    assert_eq!(video["color_space"], "bt709");
+    let decoded = std::process::Command::new(ffmpeg)
+        .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+        .arg(&path)
+        .args(["-f", "null", "-"])
+        .output()
+        .expect("decode tone-mapped AV1");
+    assert!(decoded.status.success(), "HDR-to-SDR AV1 decoding failed: {}", String::from_utf8_lossy(&decoded.stderr));
+}
+
+#[test]
+fn av1_nvenc_sdr_main10_rgba_conversion_preserves_yuv_precision() {
+    let rgba = [
+        0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 128, 128, 128, 255, 12, 80, 190, 255, 240, 160, 20, 255, 90, 45, 170,
+        255,
+    ];
+    let rgb: Vec<f32> = rgba.chunks_exact(4).flat_map(|pixel| pixel[..3].iter().map(|&v| f32::from(v) / 255.0)).collect();
+    let (mut y, mut u, mut v) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut expected_y, mut expected_u, mut expected_v) = (Vec::new(), Vec::new(), Vec::new());
+    rgba_to_yuv420_10(&rgba, 3, 3, &mut y, &mut u, &mut v).unwrap();
+    rgbf_to_yuv420_10(&rgb, 3, 3, 0.2126, 0.0722, &mut expected_y, &mut expected_u, &mut expected_v).unwrap();
+    assert_eq!((&y, &u, &v), (&expected_y, &expected_u, &expected_v), "SDR Main10 must retain 10-bit YUV precision and odd-edge chroma");
+    assert_eq!(expected_y[0], 64, "studio black");
+    assert_eq!(expected_y[1], 940, "studio white");
+    assert!(rgba_to_yuv420_10(&rgba[..7], 3, 3, &mut y, &mut u, &mut v).is_err(), "a truncated picture must fail, never panic");
+}
+
+#[test]
+fn av1_software_encoder_rejects_mismatched_size_and_hdr_input() {
+    let s = ExportSettings { format: Format::Av1, bitrate_mode: BitrateMode::Crf, ..Default::default() };
+    // Test the experimental native backend explicitly, not the production libaom fallback.
+    let mut encoder = native_av1_factory(Format::Av1, 128, 96, FrameRate::FPS_24, &s).unwrap().unwrap();
+    let av1c = match encoder.sample_entry().codec {
+        filmcraft_isobmff::CodecConfig::Av1(c) => c,
+        other => panic!("expected AV1 sample entry, got {other:?}"),
+    };
+    assert_eq!(av1c.seq_level_idx_0, 0, "av1C must match the encoder's declared AV1 level");
+    let wrong_size = EncoderFrame { width: 64, height: 96, rgba: &[], hdr: None, index: 0 };
+    let err = encoder.encode(&wrong_size).err().expect("size mismatch must fail");
+    assert!(err.to_string().contains("does not match"), "{err}");
+    let hdr = EncoderFrame { width: 128, height: 96, rgba: &[], hdr: Some(&[0.0]), index: 0 };
+    let err = encoder.encode(&hdr).err().expect("HDR frame must fail");
+    assert!(err.to_string().contains("SDR"), "{err}");
 }
 
 #[test]

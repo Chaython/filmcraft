@@ -133,35 +133,7 @@ fn clean_aperture(c: CleanAperture, (w, h): (u32, u32)) -> Option<Region> {
 /// comes from the stream's own description: `vpcC` / `apvC`, or the SPS VUI in `avcC` / `hvcC`
 /// and the sequence header in `av1C`. The rest defaults by frame size.
 fn color_from(entry: &filmcraft_isobmff::SampleEntry, w: u32, h: u32) -> ColorInfo {
-    use crate::stream_color::ColorCodes;
-    use filmcraft_isobmff::ColorInfo as Colr;
-    let colr = match entry.video.as_ref().and_then(|v| v.color.as_ref()) {
-        Some(Colr::Nclx { primaries, transfer, matrix, full_range }) => {
-            Some(ColorCodes::from_wide((*primaries).into(), (*transfer).into(), (*matrix).into(), Some(*full_range)))
-        }
-        // QuickTime `nclc` has no range flag
-        Some(Colr::Nclc { primaries, transfer, matrix }) => Some(ColorCodes::from_wide((*primaries).into(), (*transfer).into(), (*matrix).into(), None)),
-        // an ICC profile, or no `colr`: no code points
-        _ => None,
-    };
-    let stream = match &entry.codec {
-        CodecConfig::Vp9(v) => Some(ColorCodes {
-            primaries: v.colour_primaries,
-            transfer: v.transfer_characteristics,
-            matrix: v.matrix_coefficients,
-            full_range: Some(v.full_range),
-        }),
-        CodecConfig::Apv(a) if a.color_description_present => Some(ColorCodes {
-            primaries: a.color_primaries,
-            transfer: a.transfer_characteristics,
-            matrix: a.matrix_coefficients,
-            full_range: Some(a.full_range),
-        }),
-        CodecConfig::Apv(_) => None,
-        codec => crate::stream_color::from_codec_config(codec),
-    };
-    let sources: Vec<ColorCodes> = [colr, stream].into_iter().flatten().collect();
-    crate::stream_color::resolve(w, h, &sources)
+    crate::stream_color::sample_entry_color(entry, w, h)
 }
 
 /// First bytes of a Sony `rtmd` sample needed for the start-timecode block (`frames` is last).
@@ -251,14 +223,8 @@ impl Mp4Source {
             let rate = FrameRate::from_f64(t.timescale as f64 / d as f64);
             // A rate that rounds to zero (one sample per huge duration) can't be divided by.
             let rate = if rate.num > 0 && rate.den > 0 { rate } else { FrameRate::default() };
-            color = color_from(entry, w, h);
-            if entry
-                .video
-                .as_ref()
-                .is_some_and(|v| matches!(v.color, Some(filmcraft_isobmff::ColorInfo::Nclx { .. } | filmcraft_isobmff::ColorInfo::Nclc { .. })))
-            {
-                explicit_color = Some(color);
-            }
+            explicit_color = crate::stream_color::sample_entry_output_color_override(entry, w, h);
+            color = explicit_color.unwrap_or_else(|| color_from(entry, w, h));
             let bitrate = (t.samples.iter().map(|s| s.size as u64).sum::<u64>() * 8 * t.timescale as u64).checked_div(t.duration);
             let mut info = VideoStreamInfo {
                 width: w,
@@ -563,7 +529,7 @@ fn audio_stream_info(t: &filmcraft_isobmff::Track, bytes: &crate::Src) -> Option
     Some(AudioStreamInfo { sample_rate: rate.max(1), channels: ch.max(1), codec, bits_per_sample: bits })
 }
 
-fn codec_label(c: &CodecConfig) -> String {
+pub(crate) fn codec_label(c: &CodecConfig) -> String {
     match c {
         CodecConfig::Avc(a) => format!(
             "H.264 ({})",
@@ -636,8 +602,37 @@ fn avc_format(a: &filmcraft_isobmff::AvcConfig) -> Option<(u32, u32)> {
     Some((sps.chroma_format_idc, sps.bit_depth_luma))
 }
 
-fn pixfmt_label(c: &CodecConfig) -> String {
+pub(crate) fn pixfmt_label(c: &CodecConfig) -> String {
     match c {
+        // AV1 ISOBMFF binding v1.3.0 §2.3.4: av1C carries the sequence's colour configuration.
+        CodecConfig::Av1(a) => {
+            if a.seq_profile > 2
+                || (a.twelve_bit && (!a.high_bitdepth || a.seq_profile != 2))
+                || (!a.chroma_subsampling_x && a.chroma_subsampling_y)
+                || (a.seq_profile == 1 && (a.monochrome || a.chroma_subsampling_x || a.chroma_subsampling_y))
+                || ((a.monochrome || a.seq_profile == 0) && !(a.chroma_subsampling_x && a.chroma_subsampling_y))
+                || (a.seq_profile == 2 && !a.twelve_bit && !a.monochrome && (!a.chroma_subsampling_x || a.chroma_subsampling_y))
+            {
+                return String::new();
+            }
+            let bits = if a.twelve_bit {
+                12
+            } else if a.high_bitdepth {
+                10
+            } else {
+                8
+            };
+            let chroma = if a.monochrome {
+                0
+            } else if a.chroma_subsampling_y {
+                1
+            } else if a.chroma_subsampling_x {
+                2
+            } else {
+                3
+            };
+            yuv_label(chroma, bits)
+        }
         CodecConfig::Avc(a) => avc_format(a).map(|(chroma, bits)| yuv_label(chroma, bits)).unwrap_or_default(),
         CodecConfig::Hevc(h) => yuv_label(h.chroma_format_idc as u32, h.bit_depth_luma as u32),
         CodecConfig::Vp9(c) => {
@@ -1018,6 +1013,38 @@ mod tests {
         for (chroma, bits, want) in [(1, 8, "YUV 4:2:0 8-bit"), (1, 10, "YUV 4:2:0 10-bit"), (2, 8, "YUV 4:2:2 8-bit"), (2, 10, "YUV 4:2:2 10-bit")] {
             let c = filmcraft_isobmff::HevcConfig { general_profile_idc: 1, chroma_format_idc: chroma, bit_depth_luma: bits, ..Default::default() };
             assert_eq!(pixfmt_label(&CodecConfig::Hevc(c)), want);
+        }
+    }
+
+    #[test]
+    fn av1_pixel_format_comes_from_av1c() {
+        use filmcraft_isobmff::Av1Config;
+        for (profile, high, twelve, mono, x, y, want) in [
+            (0, false, false, false, true, true, "YUV 4:2:0 8-bit"),
+            (0, true, false, false, true, true, "YUV 4:2:0 10-bit"),
+            (1, false, false, false, false, false, "YUV 4:4:4 8-bit"),
+            (2, true, false, false, true, false, "YUV 4:2:2 10-bit"),
+            (2, true, true, false, false, false, "YUV 4:4:4 12-bit"),
+            (0, true, false, true, true, true, "YUV 4:0:0 10-bit"),
+            (0, false, true, false, true, true, ""),
+            (0, true, true, false, true, true, ""),
+            (7, false, false, false, true, true, ""),
+            (2, true, true, false, false, true, ""),
+            (0, false, false, false, false, false, ""),
+            (2, true, false, false, true, true, ""),
+            (2, false, false, false, false, false, ""),
+            (0, true, false, true, false, false, ""),
+        ] {
+            let c = Av1Config {
+                seq_profile: profile,
+                high_bitdepth: high,
+                twelve_bit: twelve,
+                monochrome: mono,
+                chroma_subsampling_x: x,
+                chroma_subsampling_y: y,
+                ..Default::default()
+            };
+            assert_eq!(pixfmt_label(&CodecConfig::Av1(c)), want);
         }
     }
 

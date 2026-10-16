@@ -9,7 +9,7 @@ use crate::intra::{IntraParams, is_directional_mode, predict_intra, round2_signe
 use crate::spec_tables::*;
 use crate::state::{FrameShared, TileState};
 use crate::symbol::SymbolDecoder;
-use crate::transform::inverse_transform_2d;
+use crate::transform::{inverse_transform_2d, inverse_transform_dc};
 
 /// Per-block state (the block-level variables of the syntax).
 #[derive(Clone, Default)]
@@ -394,6 +394,10 @@ impl<'a, 'f> TileDecoder<'a, 'f> {
     fn decode_block(&mut self, r: usize, c: usize, sub_size: usize) -> Result<()> {
         let (ssx, ssy) = (self.fs.ssx, self.fs.ssy);
         let num_planes = self.fs.num_planes;
+        // Conformance requirement (4:2:2 has no chroma size for 4x16 and similar blocks); indexing the size tables with BLOCK_INVALID would panic.
+        if num_planes > 1 && self.fs.plane_residual_size(sub_size, 1) == BLOCK_INVALID {
+            return Err(crate::Error::Invalid("block size has no chroma size at this subsampling"));
+        }
         let mut b = Block { mi_row: r, mi_col: c, mi_size: sub_size, ..Default::default() };
         b.bw4 = NUM_4X4_BLOCKS_WIDE[sub_size] as usize;
         b.bh4 = NUM_4X4_BLOCKS_HIGH[sub_size] as usize;
@@ -1387,7 +1391,7 @@ impl<'a, 'f> TileDecoder<'a, 'f> {
         if !self.b.skip {
             let eob = self.coeffs(plane, start_x, start_y, tx_sz);
             if eob > 0 {
-                self.reconstruct(plane, start_x, start_y, tx_sz);
+                self.reconstruct(plane, start_x, start_y, tx_sz, eob == 1);
             }
         }
         for i in 0..step_y {
@@ -1902,7 +1906,7 @@ impl<'a, 'f> TileDecoder<'a, 'f> {
     }
 
     /// Reconstruct process (7.12.3).
-    fn reconstruct(&mut self, plane: usize, x: usize, y: usize, tx_sz: usize) {
+    fn reconstruct(&mut self, plane: usize, x: usize, y: usize, tx_sz: usize, dc_only: bool) {
         let dq_denom: i64 = match tx_sz {
             TX_32X32 | TX_16X32 | TX_32X16 | TX_16X64 | TX_64X16 => 2,
             TX_64X64 | TX_32X64 | TX_64X32 => 4,
@@ -1955,7 +1959,9 @@ impl<'a, 'f> TileDecoder<'a, 'f> {
             }
         }
         let lossless = self.b.lossless;
-        inverse_transform_2d(&self.dequant, &mut self.residual, tx_sz, t, lossless, bd);
+        if !(dc_only && t == DCT_DCT && !lossless && inverse_transform_dc(self.dequant[0], &mut self.residual, tx_sz, bd)) {
+            inverse_transform_2d(&self.dequant, &mut self.residual, tx_sz, t, lossless, bd);
+        }
         let pl = &mut self.t.cur.planes[plane];
         let max = (1i32 << bd) - 1;
         for i in 0..h {
