@@ -411,7 +411,14 @@ mod tests {
             qp: Some(23),
             ..Default::default()
         };
-        let result = factory_with(Format::H264, 640, 360, FrameRate::FPS_24, &s, |_| Err("no NVIDIA encoder driver".into()));
+        let result = factory_with(
+            Format::H264,
+            640,
+            360,
+            FrameRate::FPS_24,
+            &s,
+            |_| Err("no NVIDIA encoder driver".into()),
+        );
         let Some(Err(ExportError::Unsupported(message))) = result else {
             panic!("CQP must not fall back to software H.264");
         };
