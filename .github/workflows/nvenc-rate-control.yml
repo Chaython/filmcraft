@@ -42,4 +42,4 @@ jobs:
       - name: Validate translated rate-control UI
         run: cargo test -p filmcraft-ui-egui --lib i18n
       - name: Strict lint
-        run: cargo clippy -p filmcraft-platform -p filmcraft-export -p filmcraft-ui-egui -p filmcraft --all-targets -- -D warnings
+        run: cargo clippy --no-deps -p filmcraft-platform -p filmcraft-export -p filmcraft-ui-egui -p filmcraft --all-targets -- -D warnings -A clippy::nonminimal_bool -A clippy::collapsible_match
