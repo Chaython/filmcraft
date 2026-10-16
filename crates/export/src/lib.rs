@@ -2014,6 +2014,11 @@ fn native_av1_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &Expor
     if format != Format::Av1 {
         return None;
     }
+    if s.bitrate_mode == BitrateMode::Cqp || s.multipass || s.spatial_aq || s.lookahead.is_some() {
+        return Some(Err(ExportError::Unsupported(
+            "CQP, multipass, spatial AQ and lookahead require an available NVENC AV1 encoder; the experimental software AV1 encoder cannot honor these settings".into(),
+        )));
+    }
     // The experimental native encoder accepts only BT.709 SDR 8-bit 4:2:0.
     // Never silently export 8-bit pixels carrying PQ/HLG tags as HDR.
     if s.signal.is_hdr() || s.signal != ColorSignal::default() {
