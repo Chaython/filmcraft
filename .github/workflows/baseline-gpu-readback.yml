@@ -3,6 +3,8 @@ name: Baseline GPU readback investigation
 on:
   push:
     branches: [baseline-gpu-readback-test]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
