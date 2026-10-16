@@ -599,4 +599,8 @@ fn software_encoders_reject_nvenc_only_rate_controls() {
         Some(Err(ExportError::Unsupported(message))) => assert!(message.contains("NVENC"), "{message}"),
         _ => panic!("software AV1 must reject CQP instead of silently encoding VBR"),
     }
+    match native_av1_factory(Format::Av1, 640, 360, FrameRate::FPS_24, &av1) {
+        Some(Err(ExportError::Unsupported(message))) => assert!(message.contains("NVENC"), "{message}"),
+        _ => panic!("experimental software AV1 must reject CQP instead of silently encoding VBR"),
+    }
 }
