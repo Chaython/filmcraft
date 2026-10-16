@@ -156,3 +156,82 @@ fn main10_encodes_hdr_signal_and_repeated_keyframes() {
         assert!((mean - (128.0 + i as f64 * 40.0)).abs() <= 2.0, "frame {i}: luma {mean}");
     }
 }
+
+#[test]
+fn dropping_pending_av1_main_and_main10_pictures() {
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    // Full hardware acceptance is explicit; hosted CI without an NVIDIA encoder skips.
+    const OPT_IN: &str = "FILMCRAFT_TEST_NVENC_AV1";
+    const CHILD: &str = "FILMCRAFT_NVENC_AV1_DROP_CHILD";
+    let child = std::env::var(CHILD).ok();
+    if child.is_none() && std::env::var(OPT_IN).as_deref() != Ok("1") {
+        eprintln!("SKIPPED: set {OPT_IN}=1 on a Windows NVIDIA AV1 GPU");
+        return;
+    }
+    if let Some(profile) = child {
+        let ten_bit = profile == "main10";
+        let cfg = Config {
+            width: 256,
+            height: 128,
+            fps: (24, 1),
+            bitrate_kbps: 6000,
+            max_bitrate_kbps: 9000,
+            cbr: false,
+            keyint: 24,
+            profile: if ten_bit { Profile::Av1Main10 } else { Profile::Av1Main },
+            level: None,
+            sar: None,
+            bframes: true,
+        };
+        let y8 = vec![96u8; 256 * 128];
+        let uv8 = vec![128u8; 256 * 128 / 4];
+        let y10 = vec![384u16; 256 * 128];
+        let uv10 = vec![512u16; 256 * 128 / 4];
+        for frames in [0, 1, 8, 16] {
+            for flush in [false, true] {
+                let mut enc = Nvenc::new(&cfg).expect("AV1 NVENC session");
+                let mut output = 0;
+                for i in 0..frames {
+                    let packets = if ten_bit {
+                        enc.encode_10(&y10, &uv10, &uv10, i).expect("AV1 Main10 encode")
+                    } else {
+                        enc.encode(&y8, &uv8, &uv8, i).expect("AV1 Main encode")
+                    };
+                    output += packets.len();
+                }
+                if flush {
+                    output += enc.flush().expect("drain AV1 encoder").len();
+                    assert_eq!(output, frames as usize);
+                }
+                // In the no-flush case Drop must signal EOS and safely drain the
+                // remaining GPU pictures before Session frees the buffer handles.
+                drop(enc);
+            }
+        }
+        return;
+    }
+    assert!(filmcraft_platform::nvenc::av1_available(), "explicit NVENC AV1 acceptance requires a compatible NVIDIA GPU and driver");
+    for profile in ["main", "main10"] {
+        let mut cmd = Command::new(std::env::current_exe().expect("test executable"));
+        let mut child = cmd
+            .args(["--exact", "dropping_pending_av1_main_and_main10_pictures", "--nocapture"])
+            .env(CHILD, profile)
+            .spawn()
+            .expect("spawn NVENC AV1 acceptance subprocess");
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            if let Some(status) = child.try_wait().expect("check NVENC AV1 subprocess") {
+                assert!(status.success(), "{profile} NVENC AV1 teardown crashed: {status}");
+                break;
+            }
+            if Instant::now() >= deadline {
+                child.kill().expect("stop hung NVENC AV1 subprocess");
+                child.wait().expect("reap NVENC AV1 subprocess");
+                panic!("{profile} NVENC AV1 teardown timed out");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
