@@ -746,14 +746,8 @@ impl ExportSettings {
                 return Err(ExportError::Unsupported("NVENC AV1 CQP supports only limited-range 4:2:0 8-bit or 10-bit output".into()));
             }
         }
-        if nvenc_controls && self.format == Format::Av1 && !cfg!(target_os = "windows") {
-            return Err(ExportError::Unsupported("AV1 NVENC rate-control options are currently supported on Windows only".into()));
-        }
-        if nvenc_controls && self.format == Format::Hevc && !cfg!(target_os = "windows") {
-            return Err(ExportError::Unsupported("HEVC NVENC rate-control options are currently supported on Windows only".into()));
-        }
-        if nvenc_controls && self.format == Format::H264 && cfg!(target_os = "macos") {
-            return Err(ExportError::Unsupported("CQP, multipass, spatial AQ and lookahead currently require NVENC; VideoToolbox does not support these settings".into()));
+        if nvenc_controls && !cfg!(target_os = "windows") {
+            return Err(ExportError::Unsupported("CQP, multipass, spatial AQ and lookahead currently require the Windows NVENC backend".into()));
         }
         if (self.multipass || self.spatial_aq || self.lookahead.is_some())
             && self.hardware_encoding == HardwareEncoding::Off
