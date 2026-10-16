@@ -43,8 +43,20 @@ fn native_changing_frames_decode_independently() {
                 y[row * w + col] = match i {
                     0 => ((col * 2 + row) % 256) as u8,
                     1 => ((col * 2 + row + 17) % 256) as u8,
-                    2 => if col < 64 { 40 } else { 220 },
-                    3 => if col < 80 { 40 } else { 220 },
+                    2 => {
+                        if col < 64 {
+                            40
+                        } else {
+                            220
+                        }
+                    },
+                    3 => {
+                        if col < 80 {
+                            40
+                        } else {
+                            220
+                        }
+                    },
                     _ => ((row * 2 + col) % 256) as u8,
                 };
             }
