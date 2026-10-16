@@ -134,7 +134,8 @@ pub fn encode_dc_residual(sym: &mut SymbolEncoder, qindex: u8, plane: usize, tx_
     // 4. If level > 2 (i.e. > NUM_BASE_LEVELS), write extra br-levels
     if level > 2 {
         let mut rem = level - 3;
-        if let Some(br_cdf) = tables::DEFAULT_COEFF_BR_DC_CDF_BY_TIER.get(tier).and_then(|t| t.get(s_ctx.min(3))) {
+        let dc_br_cdf = if plane == 0 { &tables::DEFAULT_COEFF_BR_DC_CDF_BY_TIER } else { &tables::DEFAULT_COEFF_BR_DC_CHROMA_CDF_BY_TIER };
+        if let Some(br_cdf) = dc_br_cdf.get(tier).and_then(|t| t.get(s_ctx.min(3))) {
             for _ in 0..(tables::COEFF_BASE_RANGE / (tables::BR_CDF_SIZE - 1)) {
                 let br = rem.min(3);
                 sym.write_symbol_no_update(br as usize, br_cdf);
