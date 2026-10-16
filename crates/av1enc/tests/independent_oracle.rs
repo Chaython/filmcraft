@@ -136,21 +136,9 @@ fn diagnose_first_gradient_chroma_values() {
     let Some(ffmpeg) = filmcraft_testkit::ffmpeg_or_skip("native AV1 chroma oracle") else { return };
     let (w, h) = (128usize, 128usize);
     let y: Vec<u8> = (0..w * h).map(|i| (((i % w) * 2 + (i / w)) % 256) as u8).collect();
-    for (u_val, v_val) in [
-        (128u8, 128u8),
-        (127, 128),
-        (126, 128),
-        (112, 128),
-        (96, 128),
-        (128, 129),
-        (128, 130),
-        (128, 160),
-        (96, 160),
-        (96, 96),
-        (160, 160),
-        (0, 0),
-        (255, 255),
-    ] {
+    for (u_val, v_val) in
+        [(128u8, 128u8), (127, 128), (126, 128), (112, 128), (96, 128), (128, 129), (128, 130), (128, 160), (96, 160), (96, 96), (160, 160), (0, 0), (255, 255)]
+    {
         let u = vec![u_val; w * h / 4];
         let v = vec![v_val; w * h / 4];
         let mut encoder = Encoder::new(EncoderConfig::new(w as u32, h as u32, 24, 10)).unwrap();
