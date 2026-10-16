@@ -1380,4 +1380,35 @@ mod tests {
             }
         });
     }
+    #[test]
+    fn nvenc_rate_control_labels_are_translated() {
+        let common = [
+            "CQP (constant quantizer)",
+            "Hardware or built-in",
+            "Lookahead",
+            "Multipass",
+            "Quantizer (QP)",
+            "Spatial AQ",
+        ];
+        for language in [Language::Es, Language::Fr, Language::Ja, Language::ZhCn, Language::PtBr] {
+            for source in common {
+                assert!(language.has(source), "{language:?} is missing {source:?}");
+                assert_ne!(language.tr(source), source, "{language:?} left {source:?} untranslated");
+            }
+        }
+        let av1 = [
+            "Full Range",
+            "Pixel Format",
+            "AV1 1080p Full HD",
+            "AV1 1920×1080, VBR 1 pass, 14 Mbps target, AAC 320 kbps",
+            "AV1 2160p 4K Ultra HD",
+            "AV1 3840×2160, VBR 1 pass, 35 Mbps target, AAC 320 kbps",
+        ];
+        for language in [Language::Es, Language::Fr, Language::Ja, Language::ZhCn, Language::PtBr] {
+            for source in av1 {
+                assert!(language.has(source), "{language:?} is missing {source:?}");
+            }
+        }
+    }
+
 }
