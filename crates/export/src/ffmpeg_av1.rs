@@ -45,6 +45,54 @@ fn checked_pixels(w: u32, h: u32) -> Result<usize> {
     pixels.filter(|&n| n > 0 && n <= 8192 * 4320).ok_or_else(|| ExportError::Unsupported("AV1 frame size exceeds encoder allocation limits".into()))
 }
 
+/// IVF timestamps use a rational clock independent of the MP4 track timescale.
+/// Reject mismatched clocks and frame counts before feeding the MP4 muxer.
+fn validate_ivf_header(header: &[u8; 32], width: u32, height: u32, rate: FrameRate, expected_frames: u64) -> Result<()> {
+    if &header[..4] != b"DKIF" || u16::from_le_bytes([header[4], header[5]]) != 0 || u16::from_le_bytes([header[6], header[7]]) != 32
+        || &header[8..12] != b"AV01"
+    {
+        return Err(ExportError::Encode("libaom returned an invalid AV1 IVF header".into()));
+    }
+    let (ew, eh) = (u16::from_le_bytes([header[12], header[13]]) as u32, u16::from_le_bytes([header[14], header[15]]) as u32);
+    if (ew, eh) != (width, height) {
+        return Err(ExportError::Encode("libaom returned mismatched AV1 frame dimensions".into()));
+    }
+    let (ivf_num, ivf_den) = (
+        u32::from_le_bytes([header[16], header[17], header[18], header[19]]),
+        u32::from_le_bytes([header[20], header[21], header[22], header[23]]),
+    );
+    let expected_num = u128::try_from(rate.num).unwrap_or(0);
+    let expected_den = u128::try_from(rate.den).unwrap_or(0);
+    if ivf_num == 0 || ivf_den == 0 || expected_num == 0 || expected_den == 0
+        || u128::from(ivf_num) * expected_den != u128::from(ivf_den) * expected_num
+    {
+        return Err(ExportError::Encode(format!(
+            "libaom IVF timebase {ivf_num}/{ivf_den} differs from requested frame rate {}/{}",
+            rate.num, rate.den
+        )));
+    }
+    let announced = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
+    if announced != 0 && u64::from(announced) != expected_frames {
+        return Err(ExportError::Encode(format!(
+            "libaom IVF header advertises {announced} frames but {expected_frames} were encoded"
+        )));
+    }
+    Ok(())
+}
+
+fn av1_profile(format: Av1PixelFormat) -> u8 {
+    let (sx, sy) = format.chroma_shift();
+    if format.bit_depth() == 12 {
+        2 // All 12-bit AV1 chroma formats require Professional profile.
+    } else if sx == 1 && sy == 1 {
+        0 // 8/10-bit 4:2:0 Main profile.
+    } else if sx == 0 && sy == 0 {
+        1 // 8/10-bit 4:4:4 High profile.
+    } else {
+        2 // 8/10-bit 4:2:2 Professional profile.
+    }
+}
+
 fn quantize(value: f32, depth: u8, chroma: bool, full: bool) -> u16 {
     let max = (1u32 << depth) - 1;
     let scale = (1u32 << (depth - 8)) as f32;
@@ -387,13 +435,7 @@ impl FfmpegAv1Encoder {
         let len = file.metadata().map_err(|e| ExportError::Io(e.to_string()))?.len();
         let mut header = [0u8; 32];
         file.read_exact(&mut header).map_err(|e| ExportError::Encode(format!("truncated AV1 IVF header: {e}")))?;
-        if &header[..4] != b"DKIF" || &header[8..12] != b"AV01" {
-            return Err(ExportError::Encode("libaom did not produce an AV1 IVF stream".into()));
-        }
-        let (ew, eh) = (u16::from_le_bytes([header[12], header[13]]) as u32, u16::from_le_bytes([header[14], header[15]]) as u32);
-        if (ew, eh) != (self.width, self.height) {
-            return Err(ExportError::Encode("libaom returned mismatched AV1 frame dimensions".into()));
-        }
+        validate_ivf_header(&header, self.width, self.height, self.rate, self.frames)?;
         let mut emitted = 0u64;
         let mut accounted = 32u64;
         while accounted < len {
@@ -434,13 +476,7 @@ impl VideoEncoder for FfmpegAv1Encoder {
     fn sample_entry(&self) -> SampleEntry {
         let (sx, sy) = self.format.chroma_shift();
         let initial = self.config.clone().unwrap_or(Av1Config {
-            seq_profile: if sx == 1 && sy == 1 {
-                0
-            } else if sx == 0 && self.format.bit_depth() < 12 {
-                1
-            } else {
-                2
-            },
+            seq_profile: av1_profile(self.format),
             seq_level_idx_0: 0,
             seq_tier_0: false,
             high_bitdepth: self.format.bit_depth() > 8,
@@ -517,6 +553,36 @@ pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, settings: &Expor
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initial_av1_configuration_uses_the_required_profile_for_each_pixel_format() {
+        let expected = [0, 0, 2, 2, 2, 2, 1, 1, 2];
+        for (format, profile) in Av1PixelFormat::ALL.into_iter().zip(expected) {
+            assert_eq!(av1_profile(format), profile, "wrong provisional AV1 profile for {}", format.label());
+        }
+    }
+
+    #[test]
+    fn ivf_header_must_match_frame_rate_dimensions_and_number_of_samples() {
+        let mut header = [0u8; 32];
+        header[..4].copy_from_slice(b"DKIF");
+        header[6..8].copy_from_slice(&32u16.to_le_bytes());
+        header[8..12].copy_from_slice(b"AV01");
+        header[12..14].copy_from_slice(&64u16.to_le_bytes());
+        header[14..16].copy_from_slice(&48u16.to_le_bytes());
+        header[16..20].copy_from_slice(&24u32.to_le_bytes());
+        header[20..24].copy_from_slice(&1u32.to_le_bytes());
+        header[24..28].copy_from_slice(&3u32.to_le_bytes());
+        assert!(validate_ivf_header(&header, 64, 48, FrameRate::FPS_24, 3).is_ok());
+        assert!(validate_ivf_header(&header, 64, 48, FrameRate::FPS_24, 2).is_err());
+        assert!(validate_ivf_header(&header, 65, 48, FrameRate::FPS_24, 3).is_err());
+        header[16..20].copy_from_slice(&30u32.to_le_bytes());
+        assert!(validate_ivf_header(&header, 64, 48, FrameRate::FPS_24, 3).is_err());
+        header[16..20].copy_from_slice(&24u32.to_le_bytes());
+        header[6..8].copy_from_slice(&33u16.to_le_bytes());
+        assert!(validate_ivf_header(&header, 64, 48, FrameRate::FPS_24, 3).is_err());
+    }
+
     #[test]
     fn av1_temp_spool_uses_requested_scratch_directory_and_unique_files() {
         let directory = std::env::temp_dir();
