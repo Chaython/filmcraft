@@ -813,6 +813,14 @@ pub trait VideoEncoder: Send {
     fn timescale(&self) -> u32;
     fn encode(&mut self, frame: &EncoderFrame) -> Result<Vec<EncodedPacket>>;
     fn flush(&mut self) -> Result<Vec<EncodedPacket>>;
+    /// Flush directly into the container, bounding peak RAM to one encoded packet.
+    /// Other encoders can keep returning their usual small delayed packet batches.
+    fn flush_into(&mut self, emit: &mut dyn FnMut(EncodedPacket) -> Result<()>) -> Result<()> {
+        for packet in self.flush()? {
+            emit(packet)?;
+        }
+        Ok(())
+    }
     /// Media start offset for an edit list (B-frame delay), in the encoder timescale.
     fn media_start(&self) -> Option<i64> {
         None

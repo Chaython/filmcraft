@@ -510,9 +510,24 @@ impl Exporter {
         if self.mux.is_none() && self.mxf.is_none() {
             self.open_mux()?;
         }
-        let mut tail = std::mem::take(&mut self.queued);
-        tail.extend(self.venc.flush()?);
-        self.write_video(tail)?;
+        let queued = std::mem::take(&mut self.queued);
+        self.write_video(queued)?;
+        // libaom encodes the spooled frames during flush. Stream the resulting
+        // packets into the already-open muxer instead of accumulating gigabytes
+        // of AV1 temporal units in one Vec before writing the container.
+        let vt = self.vt;
+        let (mux, mxf) = (&mut self.mux, &mut self.mxf);
+        self.venc.flush_into(&mut |packet| {
+            if let Some(m) = mxf.as_mut() {
+                return m.write_video(vec![packet]);
+            }
+            let mux = mux.as_mut().ok_or_else(|| ExportError::Encode("internal: missing container during video flush".into()))?;
+            mux.write_sample(
+                vt,
+                WriteSample { data: &packet.data, duration: packet.duration, composition_offset: packet.composition_offset, is_sync: packet.key },
+            )
+            .map_err(|e| ExportError::Io(e.to_string()))
+        })?;
         self.write_audio(mixed)?;
         if let (Some(at), Some(a)) = (self.at, self.aenc.as_mut()) {
             let mux = self.mux.as_mut().ok_or_else(|| ExportError::Encode("internal: the container writer was not created".into()))?;

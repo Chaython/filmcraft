@@ -14,7 +14,6 @@ use filmcraft_isobmff::{Av1Config, ColorInfo, SampleEntry};
 use filmcraft_time::FrameRate;
 
 static FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-const MAX_IVF_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_FRAME_BYTES: usize = 128 * 1024 * 1024;
 
 fn unique_temp_file() -> Result<(File, PathBuf, PathBuf)> {
@@ -281,7 +280,7 @@ impl FfmpegAv1Encoder {
             finished: false,
         })
     }
-    fn encode_ivf(&mut self) -> Result<Vec<EncodedPacket>> {
+    fn encode_ivf_into(&mut self, emit: &mut dyn FnMut(EncodedPacket) -> Result<()>) -> Result<()> {
         if self.frames == 0 {
             return Err(ExportError::Unsupported("cannot encode empty AV1 sequence".into()));
         }
@@ -363,9 +362,6 @@ impl FfmpegAv1Encoder {
         }
         let mut file = File::open(&self.ivf_path).map_err(|e| ExportError::Io(e.to_string()))?;
         let len = file.metadata().map_err(|e| ExportError::Io(e.to_string()))?.len();
-        if len > MAX_IVF_BYTES {
-            return Err(ExportError::Unsupported("AV1 output exceeds temporary IVF memory safety cap; use shorter exports".into()));
-        }
         let mut header = [0u8; 32];
         file.read_exact(&mut header).map_err(|e| ExportError::Encode(format!("truncated AV1 IVF header: {e}")))?;
         if &header[..4] != b"DKIF" || &header[8..12] != b"AV01" {
@@ -375,7 +371,7 @@ impl FfmpegAv1Encoder {
         if (ew, eh) != (self.width, self.height) {
             return Err(ExportError::Encode("libaom returned mismatched AV1 frame dimensions".into()));
         }
-        let mut out = Vec::new();
+        let mut emitted = 0u64;
         let mut accounted = 32u64;
         while accounted < len {
             let mut fh = [0u8; 12];
@@ -388,22 +384,27 @@ impl FfmpegAv1Encoder {
             if accounted > len {
                 return Err(ExportError::Encode("AV1 IVF frame size exceeds file length".into()));
             }
+            let timestamp = u64::from_le_bytes(fh[4..12].try_into().unwrap());
+            if timestamp != emitted {
+                return Err(ExportError::Encode(format!("libaom IVF timeline is not consecutive: frame {emitted} has timestamp {timestamp}")));
+            }
             let mut data = vec![0u8; size];
             file.read_exact(&mut data).map_err(|e| ExportError::Encode(format!("truncated AV1 IVF packet: {e}")))?;
             if self.config.is_none() {
                 self.config = Some(av1_config(&data, self.format, self.signal, self.full_range)?);
             }
-            out.push(EncodedPacket {
+            emit(EncodedPacket {
                 key: filmcraft_av1::is_key_frame_unit(&data),
                 data,
                 duration: u32::try_from(self.rate.den).map_err(|_| ExportError::Unsupported("AV1 timescale overflow".into()))?,
                 composition_offset: 0,
-            });
+            })?;
+            emitted += 1;
         }
-        if out.len() as u64 != self.frames {
-            return Err(ExportError::Encode(format!("libaom emitted {} AV1 samples for {} input frames; refuse incorrect timestamps", out.len(), self.frames)));
+        if emitted != self.frames {
+            return Err(ExportError::Encode(format!("libaom emitted {emitted} AV1 samples for {} input frames; refuse incorrect timestamps", self.frames)));
         }
-        Ok(out)
+        Ok(())
     }
 }
 impl VideoEncoder for FfmpegAv1Encoder {
@@ -468,11 +469,19 @@ impl VideoEncoder for FfmpegAv1Encoder {
         Ok(Vec::new())
     }
     fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
+        let mut packets = Vec::new();
+        self.flush_into(&mut |packet| {
+            packets.push(packet);
+            Ok(())
+        })?;
+        Ok(packets)
+    }
+    fn flush_into(&mut self, emit: &mut dyn FnMut(EncodedPacket) -> Result<()>) -> Result<()> {
         if self.finished {
-            return Ok(Vec::new());
+            return Ok(());
         }
         self.finished = true;
-        self.encode_ivf()
+        self.encode_ivf_into(emit)
     }
 }
 pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, settings: &ExportSettings) -> Option<Result<Box<dyn VideoEncoder>>> {
