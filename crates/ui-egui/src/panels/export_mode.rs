@@ -734,10 +734,20 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     let labels: Vec<(String, bool)> = formats.iter().map(|p| (p.label().to_owned(), true)).collect();
                     if let Some(i) = combo(ui, reg, "export.video.av1PixelFormat", s.av1_pixel_format.label(), &labels, 180.0) {
                         s.av1_pixel_format = formats[i];
+                        if s.bitrate_mode == BitrateMode::Cqp
+                            && !matches!(s.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10)
+                        {
+                            s.bitrate_mode = BitrateMode::Vbr1Pass;
+                        }
                     }
                 });
                 row(ui, t, tl!("Full Range"), |ui| {
-                    check(ui, reg, "export.video.av1FullRange", &mut s.av1_full_range, "Full (0–max) instead of studio/video levels");
+                    if check(ui, reg, "export.video.av1FullRange", &mut s.av1_full_range, "Full (0–max) instead of studio/video levels")
+                        && s.av1_full_range
+                        && s.bitrate_mode == BitrateMode::Cqp
+                    {
+                        s.bitrate_mode = BitrateMode::Vbr1Pass;
+                    }
                 });
                 row(ui, t, tl!("Encoder"), |ui| {
                     if s.bitrate_mode == BitrateMode::Cqp {
