@@ -437,6 +437,18 @@ pub struct ExportSettings {
     /// 18 is visually near-lossless.
     #[serde(default = "default_crf")]
     pub crf: f32,
+    /// Constant quantizer parameter for NVENC CQP. None uses a codec-appropriate default.
+    #[serde(default)]
+    pub qp: Option<u32>,
+    /// Lookahead frames for NVENC rate control.
+    #[serde(default)]
+    pub lookahead: Option<u32>,
+    /// NVENC multipass rate control (separate from the software two-pass mode).
+    #[serde(default)]
+    pub multipass: bool,
+    /// NVENC spatial adaptive quantization.
+    #[serde(default)]
+    pub spatial_aq: bool,
     /// May H.264 be encoded by the system's hardware encoder (VideoToolbox on macOS, NVENC on
     /// Windows)? Off unless asked for: hardware output depends on the machine, so it is not
     /// byte-reproducible like the built-in encoder's (`determinism_tests`).
@@ -644,6 +656,10 @@ impl Default for ExportSettings {
             h264_level: None,
             bitrate_mode: BitrateMode::default(),
             crf: DEFAULT_CRF,
+            qp: None,
+            lookahead: None,
+            multipass: false,
+            spatial_aq: false,
             hardware_encoding: HardwareEncoding::default(),
             gpu_rendering: GpuRendering::Off,
             max_bitrate_kbps: None,
@@ -711,6 +727,29 @@ impl ExportSettings {
         }
         if self.effects.image_overlay.enabled && self.effects.image_overlay.path.trim().is_empty() {
             return Err(ExportError::Unsupported("image overlay: no image file chosen".into()));
+        }
+        if self.bitrate_mode == BitrateMode::Cqp {
+            if !matches!(self.format, Format::H264 | Format::Hevc | Format::Av1) {
+                return Err(ExportError::Unsupported("CQP is available only for H.264, H.265 or AV1 NVENC exports".into()));
+            }
+            if self.format != Format::Hevc && self.hardware_encoding == HardwareEncoding::Off {
+                return Err(ExportError::Unsupported("CQP requires hardware encoding; enable Hardware Encoding to use NVENC".into()));
+            }
+            let max_qp = if self.format == Format::Av1 { 255 } else { 51 };
+            if self.qp.is_some_and(|qp| qp > max_qp) {
+                return Err(ExportError::Unsupported(format!("{} CQP must be between 0 and {max_qp}", self.format.label())));
+            }
+            if self.format == Format::Av1
+                && (self.av1_full_range || !matches!(self.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10))
+            {
+                return Err(ExportError::Unsupported("NVENC AV1 CQP supports only limited-range 4:2:0 8-bit or 10-bit output".into()));
+            }
+        }
+        if (self.multipass || self.spatial_aq || self.lookahead.is_some())
+            && self.hardware_encoding == HardwareEncoding::Off
+            && self.format != Format::Hevc
+        {
+            return Err(ExportError::Unsupported("multipass, spatial AQ and lookahead require hardware encoding".into()));
         }
         if (self.format == Format::Hevc || self.format == Format::Av1) && self.bitrate_mode == BitrateMode::Vbr2Pass {
             return Err(ExportError::Unsupported(format!("{} export has no two-pass mode: choose CBR or VBR, 1 pass", self.format.label())));
