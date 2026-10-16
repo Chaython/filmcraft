@@ -48,7 +48,9 @@ fn checked_pixels(w: u32, h: u32) -> Result<usize> {
 /// IVF timestamps use a rational clock independent of the MP4 track timescale.
 /// Reject mismatched clocks and frame counts before feeding the MP4 muxer.
 fn validate_ivf_header(header: &[u8; 32], width: u32, height: u32, rate: FrameRate, expected_frames: u64) -> Result<()> {
-    if &header[..4] != b"DKIF" || u16::from_le_bytes([header[4], header[5]]) != 0 || u16::from_le_bytes([header[6], header[7]]) != 32
+    if &header[..4] != b"DKIF"
+        || u16::from_le_bytes([header[4], header[5]]) != 0
+        || u16::from_le_bytes([header[6], header[7]]) != 32
         || &header[8..12] != b"AV01"
     {
         return Err(ExportError::Encode("libaom returned an invalid AV1 IVF header".into()));
@@ -57,25 +59,16 @@ fn validate_ivf_header(header: &[u8; 32], width: u32, height: u32, rate: FrameRa
     if (ew, eh) != (width, height) {
         return Err(ExportError::Encode("libaom returned mismatched AV1 frame dimensions".into()));
     }
-    let (ivf_num, ivf_den) = (
-        u32::from_le_bytes([header[16], header[17], header[18], header[19]]),
-        u32::from_le_bytes([header[20], header[21], header[22], header[23]]),
-    );
+    let (ivf_num, ivf_den) =
+        (u32::from_le_bytes([header[16], header[17], header[18], header[19]]), u32::from_le_bytes([header[20], header[21], header[22], header[23]]));
     let expected_num = u128::try_from(rate.num).unwrap_or(0);
     let expected_den = u128::try_from(rate.den).unwrap_or(0);
-    if ivf_num == 0 || ivf_den == 0 || expected_num == 0 || expected_den == 0
-        || u128::from(ivf_num) * expected_den != u128::from(ivf_den) * expected_num
-    {
-        return Err(ExportError::Encode(format!(
-            "libaom IVF timebase {ivf_num}/{ivf_den} differs from requested frame rate {}/{}",
-            rate.num, rate.den
-        )));
+    if ivf_num == 0 || ivf_den == 0 || expected_num == 0 || expected_den == 0 || u128::from(ivf_num) * expected_den != u128::from(ivf_den) * expected_num {
+        return Err(ExportError::Encode(format!("libaom IVF timebase {ivf_num}/{ivf_den} differs from requested frame rate {}/{}", rate.num, rate.den)));
     }
     let announced = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
     if announced != 0 && u64::from(announced) != expected_frames {
-        return Err(ExportError::Encode(format!(
-            "libaom IVF header advertises {announced} frames but {expected_frames} were encoded"
-        )));
+        return Err(ExportError::Encode(format!("libaom IVF header advertises {announced} frames but {expected_frames} were encoded")));
     }
     Ok(())
 }
@@ -233,6 +226,12 @@ fn av1_config(packet: &[u8], requested: Av1PixelFormat, signal: ColorSignal, ful
     let (obu, payload) = sequence_header(packet).ok_or_else(|| ExportError::Encode("libaom produced AV1 frames without a sequence header OBU".into()))?;
     let seq = SequenceHeader::parse(payload).map_err(|e| ExportError::Encode(format!("invalid FFmpeg AV1 sequence header: {e}")))?;
     let (sx, sy) = requested.chroma_shift();
+    if seq.profile != av1_profile(requested) {
+        return Err(ExportError::Encode(format!(
+            "libaom AV1 profile {} does not match requested {} (expected profile {})",
+            seq.profile, requested.label(), av1_profile(requested)
+        )));
+    }
     let color = seq.color;
     if color.bit_depth != requested.bit_depth() || color.subsampling_x as usize != sx || color.subsampling_y as usize != sy || color.mono_chrome {
         return Err(ExportError::Encode(format!("libaom emitted a different AV1 pixel format than requested {}", requested.label())));
@@ -578,7 +577,11 @@ mod tests {
         assert!(validate_ivf_header(&header, 65, 48, FrameRate::FPS_24, 3).is_err());
         header[16..20].copy_from_slice(&30u32.to_le_bytes());
         assert!(validate_ivf_header(&header, 64, 48, FrameRate::FPS_24, 3).is_err());
+        header[16..20].copy_from_slice(&0u32.to_le_bytes());
+        assert!(validate_ivf_header(&header, 64, 48, FrameRate::FPS_24, 3).is_err());
         header[16..20].copy_from_slice(&24u32.to_le_bytes());
+        header[24..28].copy_from_slice(&0u32.to_le_bytes());
+        assert!(validate_ivf_header(&header, 64, 48, FrameRate::FPS_24, 3).is_ok(), "IVF permits an unspecified frame count");
         header[6..8].copy_from_slice(&33u16.to_le_bytes());
         assert!(validate_ivf_header(&header, 64, 48, FrameRate::FPS_24, 3).is_err());
     }
