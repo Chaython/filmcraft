@@ -40,7 +40,7 @@ jobs:
       - name: Check affected crates and desktop app
         run: cargo check -p filmcraft-platform -p filmcraft-export -p filmcraft-ui-egui -p filmcraft --all-targets
       - name: Validate export rate-control settings and software fallback
-        run: cargo test -p filmcraft-export --lib cqp && cargo test -p filmcraft-export --lib software_encoders_reject_nvenc_only_rate_controls && cargo test -p filmcraft-export --lib av1_nvenc_controls_reject_full_range_and_non_420_formats && cargo test -p filmcraft-export --lib h264_two_pass_rejects_nvenc_only_controls
+        run: cargo test -p filmcraft-export --lib cqp && cargo test -p filmcraft-export --lib software_encoders_reject_nvenc_only_rate_controls && cargo test -p filmcraft-export --lib av1_nvenc_controls_reject_full_range_and_non_420_formats && cargo test -p filmcraft-export --lib h264_two_pass_rejects_nvenc_only_controls && cargo test -p filmcraft-export --lib hdr_av1_pixel_format_upgrade_preserves_chroma_subsampling
       - name: Validate NVENC AV1 QP, buffering and rate-control configuration
         run: cargo test -p filmcraft-platform --lib cqp && cargo test -p filmcraft-platform --lib lookahead_expands_encoder_ring_before_submission && cargo test -p filmcraft-platform --lib av1_cqp_and_advanced_controls_map_to_nvenc_config && cargo test -p filmcraft-platform --lib two_pass_vbr_declines_nvenc_for_software_h264 && cargo test -p filmcraft-platform --lib missing_driver_is_an_error_when_nvenc_rate_control_is_required
       - name: Validate translated rate-control UI

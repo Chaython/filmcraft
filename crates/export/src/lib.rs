@@ -86,6 +86,15 @@ impl Av1PixelFormat {
             _ => 12,
         }
     }
+    /// Promote 8-bit AV1 formats to 10-bit without changing chroma subsampling.
+    pub const fn at_least_10_bit(self) -> Self {
+        match self {
+            Self::Yuv420p8 => Self::Yuv420p10,
+            Self::Yuv422p8 => Self::Yuv422p10,
+            Self::Yuv444p8 => Self::Yuv444p10,
+            other => other,
+        }
+    }
     pub const fn chroma_shift(self) -> (usize, usize) {
         match self {
             Self::Yuv420p8 | Self::Yuv420p10 | Self::Yuv420p12 => (1, 1),

@@ -598,6 +598,16 @@ fn cqp_rejects_multipass_and_lookahead() {
 }
 
 #[test]
+fn hdr_av1_pixel_format_upgrade_preserves_chroma_subsampling() {
+    assert_eq!(Av1PixelFormat::Yuv420p8.at_least_10_bit(), Av1PixelFormat::Yuv420p10);
+    assert_eq!(Av1PixelFormat::Yuv422p8.at_least_10_bit(), Av1PixelFormat::Yuv422p10);
+    assert_eq!(Av1PixelFormat::Yuv444p8.at_least_10_bit(), Av1PixelFormat::Yuv444p10);
+    assert_eq!(Av1PixelFormat::Yuv420p12.at_least_10_bit(), Av1PixelFormat::Yuv420p12);
+    assert_eq!(Av1PixelFormat::Yuv422p12.at_least_10_bit(), Av1PixelFormat::Yuv422p12);
+    assert_eq!(Av1PixelFormat::Yuv444p12.at_least_10_bit(), Av1PixelFormat::Yuv444p12);
+}
+
+#[test]
 fn h264_two_pass_rejects_nvenc_only_controls() {
     let settings = ExportSettings {
         format: Format::H264,

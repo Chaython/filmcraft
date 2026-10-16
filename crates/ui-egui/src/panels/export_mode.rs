@@ -706,6 +706,11 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
         f @ (Format::H264 | Format::Hevc | Format::Av1) => {
             let hevc = f == Format::Hevc;
             let av1 = f == Format::Av1;
+            // HDR AV1 requires at least 10 bits. Upgrade only the bit depth so 4:2:2 and
+            // 4:4:4 selections remain intact and can use the software AV1 encoder.
+            if av1 && seq_hdr && !s.sdr {
+                s.av1_pixel_format = s.av1_pixel_format.at_least_10_bit();
+            }
             let av1_nvenc_eligible = !s.av1_full_range && matches!(s.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10);
             // This fork's AV1 NVENC path is currently Windows-only. CQP and the advanced controls
             // must not be offered when the export would silently fall back to software.
