@@ -495,6 +495,47 @@ pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, settings: &Expor
 mod tests {
     use super::*;
     #[test]
+    fn libaom_flush_into_streams_packets_and_preserves_av1_configuration() {
+        let strict = std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() == Ok("1");
+        let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|v| !v.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+        if !Command::new(ffmpeg).arg("-version").output().is_ok_and(|o| o.status.success()) {
+            assert!(!strict, "libaom streaming acceptance requires FFmpeg");
+            return;
+        }
+        let settings = ExportSettings {
+            format: Format::Av1,
+            av1_pixel_format: Av1PixelFormat::Yuv420p10,
+            bitrate_mode: BitrateMode::Crf,
+            crf: 38.0,
+            ..Default::default()
+        };
+        let mut encoder = FfmpegAv1Encoder::new(64, 64, FrameRate::FPS_24, &settings).expect("create libaom encoder");
+        let rgba = vec![123u8; 64 * 64 * 4];
+        for i in 0..5 {
+            let frame = EncoderFrame { width: 64, height: 64, rgba: &rgba, hdr: None, index: i };
+            assert!(encoder.encode(&frame).expect("spool frame").is_empty());
+        }
+        let mut count = 0u64;
+        let mut max_packet = 0usize;
+        encoder
+            .flush_into(&mut |packet| {
+                assert!(packet.key || count != 0, "first AV1 frame must be a random access point");
+                assert_eq!(packet.duration, 1);
+                max_packet = max_packet.max(packet.data.len());
+                count += 1;
+                Ok(())
+            })
+            .expect("stream encoded packets to callback");
+        assert_eq!(count, 5);
+        assert!(max_packet > 0);
+        assert!(encoder.flush().expect("idempotent flush").is_empty());
+        let entry = encoder.final_sample_entry().expect("validated sequence header").expect("AV1 sample entry");
+        let CodecConfig::Av1(av1) = entry.codec else { panic!("libaom must emit an AV1 sample entry") };
+        assert!(av1.high_bitdepth);
+        assert!(!av1.config_obus.is_empty());
+    }
+
+    #[test]
     fn precision_and_range_codes_are_bounded() {
         for depth in [8, 10, 12] {
             assert_eq!(quantize(0.0, depth, false, false), 16u16 << (depth - 8));
