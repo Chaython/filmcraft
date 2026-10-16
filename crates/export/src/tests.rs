@@ -576,25 +576,15 @@ fn h264_cqp_uses_the_h264_qp_range() {
 
 #[test]
 fn software_encoders_reject_nvenc_only_rate_controls() {
-    let h264 = ExportSettings {
-        format: Format::H264,
-        hardware_encoding: HardwareEncoding::Auto,
-        bitrate_mode: BitrateMode::Cqp,
-        qp: Some(23),
-        ..Default::default()
-    };
+    let h264 =
+        ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(23), ..Default::default() };
     match h264_factory(Format::H264, 640, 360, FrameRate::FPS_24, &h264) {
         Some(Err(ExportError::Unsupported(message))) => assert!(message.contains("NVENC"), "{message}"),
         _ => panic!("software H.264 must reject CQP instead of silently encoding VBR"),
     }
 
-    let av1 = ExportSettings {
-        format: Format::Av1,
-        hardware_encoding: HardwareEncoding::Auto,
-        bitrate_mode: BitrateMode::Cqp,
-        qp: Some(128),
-        ..Default::default()
-    };
+    let av1 =
+        ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(128), ..Default::default() };
     match ffmpeg_av1::factory(Format::Av1, 640, 360, FrameRate::FPS_24, &av1) {
         Some(Err(ExportError::Unsupported(message))) => assert!(message.contains("NVENC"), "{message}"),
         _ => panic!("software AV1 must reject CQP instead of silently encoding VBR"),
