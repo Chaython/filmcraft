@@ -125,6 +125,7 @@ pub(crate) struct Pipeline {
     pub h: u32,
     geom: Geometry,
     opts: RenderOptions,
+    /// Encoded float RGB output: true for HDR and high-bit-depth SDR AV1.
     pub hdr_out: bool,
     /// Keep straight alpha in the RGBA8 output instead of flattening over black.
     alpha: bool,

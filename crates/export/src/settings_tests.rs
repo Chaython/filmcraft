@@ -1019,10 +1019,12 @@ fn av1_mkv_high_bitdepth_444_roundtrip() {
     };
     let result = export(&p, seq, &settings, &sources, &Progress::default()).expect("12-bit AV1 MKV export");
     assert_eq!(result.frames, 3);
-    let probe = ffprobe_json(&["-show_entries", "stream=codec_name,codec_type,pix_fmt"], &path).expect("ffprobe 12-bit Matroska");
+    let probe = ffprobe_json(&["-show_entries", "stream=codec_name,codec_type,pix_fmt,color_primaries,color_transfer"], &path).expect("ffprobe 12-bit Matroska");
     let video = &probe["streams"][0];
     assert_eq!(video["codec_name"], "av1", "Matroska must contain AV1");
     assert_eq!(video["pix_fmt"], "yuv444p12le", "Matroska must retain the 12-bit 4:4:4 AV1 profile");
+    assert_eq!(video["color_primaries"], "bt709", "High-bit-depth SDR must retain BT.709 and never masquerade as HDR");
+    assert_eq!(video["color_transfer"], "bt709", "High-bit-depth SDR must retain SDR transfer metadata");
     let decoded = std::process::Command::new(ffmpeg)
         .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
         .arg(&path)

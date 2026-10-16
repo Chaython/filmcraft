@@ -215,6 +215,12 @@ fn av1_software_export_modes_force_sdr_for_hdr_sources() {
     assert!(!job::av1_requires_sdr(&ten_bit), "10-bit libaom/NVENC should preserve source HDR");
     assert!(job::hdr_output(true, job::av1_requires_sdr(&ten_bit), Format::Av1, |_| true));
     assert!(!job::hdr_output(true, job::av1_requires_sdr(&base), Format::Av1, |_| true));
+    assert!(!job::av1_sdr_float(&base, false), "AV1 8-bit SDR should keep the low-memory RGBA8 path");
+    assert!(job::av1_sdr_float(&ten_bit, false), "AV1 SDR Main10 must preserve encoded float precision");
+    assert!(!job::av1_sdr_float(&ten_bit, true), "HDR already follows its own output and tone-mapping decisions");
+    let twelve_bit = ExportSettings { av1_pixel_format: Av1PixelFormat::Yuv444p12, ..base.clone() };
+    assert!(job::av1_sdr_float(&twelve_bit, false), "Professional 12-bit SDR must preserve encoded float precision");
+    assert!(!job::av1_sdr_float(&ExportSettings { format: Format::Hevc, ..ten_bit }, false));
     assert!(!job::hdr_output(true, job::av1_software_sdr(&off), Format::Av1, |_| true));
     assert!(!job::hdr_output(true, job::av1_software_sdr(&ExportSettings { bitrate_mode: BitrateMode::Crf, ..base }), Format::Av1, |_| true));
 }

@@ -209,6 +209,12 @@ pub(crate) fn av1_requires_sdr(s: &ExportSettings) -> bool {
     s.video_format() == Format::Av1 && (s.av1_pixel_format.bit_depth() < 10 || av1_software_sdr(s))
 }
 
+/// High-bit-depth SDR AV1 needs an encoded RGB float frame without falsely
+/// claiming PQ/HLG colorimetry. HDR tone-mapping remains a separate decision.
+pub(crate) fn av1_sdr_float(settings: &ExportSettings, working_hdr: bool) -> bool {
+    settings.video_format() == Format::Av1 && settings.av1_pixel_format.bit_depth() >= 10 && !working_hdr
+}
+
 pub(crate) fn hdr_output(working_hdr: bool, sdr: bool, format: Format, hdr_available: impl Fn(Format) -> bool) -> bool {
     working_hdr
         && !sdr
@@ -264,7 +270,11 @@ impl Exporter {
         let two_pass = settings.video_format() == Format::H264 && settings.bitrate_mode == BitrateMode::Vbr2Pass;
         settings.h264_pass = if two_pass { H264Pass::First } else { H264Pass::Single };
         let range = export_range(&project, seq, &settings)?;
-        let pipe = Arc::new(Pipeline::new(project.clone(), seq, &settings, hdr_out)?);
+        // The output's color signal follows the *actual* HDR decision above.
+        // Float precision is separate: SDR Main10 / Professional AV1 should not
+        // be rounded to RGBA8 before its 10/12-bit YUV encoder can see it.
+        let high_precision_frames = hdr_out || av1_sdr_float(&settings, pipe.working.is_hdr());
+        let pipe = Arc::new(Pipeline::new(project.clone(), seq, &settings, high_precision_frames)?);
         let (f0, f1) = frame_span(pipe.rate, range);
         let nframes = (f1 - f0) as u64;
         if !settings.part_of_batch {
