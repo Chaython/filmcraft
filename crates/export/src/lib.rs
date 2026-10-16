@@ -745,8 +745,8 @@ impl ExportSettings {
                 return Err(ExportError::Unsupported("NVENC AV1 CQP supports only limited-range 4:2:0 8-bit or 10-bit output".into()));
             }
         }
-        if nvenc_controls && !cfg!(target_os = "windows") {
-            return Err(ExportError::Unsupported("CQP, multipass, spatial AQ and lookahead currently require the Windows NVENC backend".into()));
+        if nvenc_controls && !cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            return Err(ExportError::Unsupported("CQP, multipass, spatial AQ and lookahead currently require Windows x64 NVENC".into()));
         }
         if (self.multipass || self.spatial_aq || self.lookahead.is_some()) && self.hardware_encoding == HardwareEncoding::Off && self.format != Format::Hevc {
             return Err(ExportError::Unsupported("multipass, spatial AQ and lookahead require hardware encoding".into()));
