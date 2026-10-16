@@ -148,6 +148,14 @@ pub struct Packet {
 
 /// Pictures in flight: input / output buffer pairs.
 const RING: usize = 8;
+/// NVENC's lookahead and reordering delay need input/output slots to remain in flight.
+const EXTRA_OUTPUT_DELAY: usize = 4;
+
+fn encoder_ring_size(lookahead: Option<u32>, cqp: bool, bframes: u32) -> usize {
+    let max_depth = 31u32.saturating_sub(bframes).max(1);
+    let depth = if cqp { 0 } else { lookahead.map(|n| n.clamp(1, max_depth) as usize).unwrap_or(0) };
+    RING.max(1 + bframes as usize + depth + EXTRA_OUTPUT_DELAY)
+}
 
 /// An NVENC encoder (H.264, or HEVC when the profile is [`Profile::HevcMain`] or [`Profile::HevcMain10`], or AV1).
 pub struct Nvenc {
@@ -458,7 +466,7 @@ impl Nvenc {
         if codec == Codec::Av1 {
             params.signal.sei.clear();
         }
-        session.initialize(&params, RING)?;
+        session.initialize(&params, encoder_ring_size(cfg.lookahead, cfg.cqp, bframes))?;
         let params = session.sequence_params()?;
         let (vps, sps, pps, hvcc, av1c) = match codec {
             Codec::H264 => {
@@ -1051,5 +1059,13 @@ mod tests {
         assert!(validate_qp(&cfg).is_ok());
         cfg.qp = 52;
         assert!(validate_qp(&cfg).is_err());
+    }
+    #[test]
+    fn lookahead_expands_encoder_ring_before_submission() {
+        assert_eq!(encoder_ring_size(None, false, 1), RING);
+        assert_eq!(encoder_ring_size(Some(16), false, 1), 22);
+        assert_eq!(encoder_ring_size(Some(30), false, 1), 36);
+        assert_eq!(encoder_ring_size(Some(u32::MAX), false, 1), 36);
+        assert_eq!(encoder_ring_size(Some(30), true, 1), RING);
     }
 }

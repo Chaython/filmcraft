@@ -402,6 +402,36 @@ mod tests {
     }
 
     #[test]
+    fn av1_cqp_and_advanced_controls_map_to_nvenc_config() {
+        let cqp = ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            bitrate_mode: BitrateMode::Cqp,
+            qp: Some(200),
+            ..Default::default()
+        };
+        let cfg = config(Format::Av1, 640, 360, FrameRate::FPS_24, &cqp).unwrap();
+        assert!(cfg.cqp);
+        assert_eq!(cfg.qp, 200);
+        assert!(!cfg.multipass);
+        assert_eq!(cfg.lookahead, None);
+
+        let vbr = ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            multipass: true,
+            spatial_aq: true,
+            lookahead: Some(16),
+            ..Default::default()
+        };
+        let cfg = config(Format::Av1, 640, 360, FrameRate::FPS_24, &vbr).unwrap();
+        assert!(!cfg.cqp);
+        assert!(cfg.multipass);
+        assert!(cfg.spatial_aq);
+        assert_eq!(cfg.lookahead, Some(16));
+    }
+
+    #[test]
     fn missing_driver_is_an_error_when_nvenc_rate_control_is_required() {
         let cases = [
             ExportSettings { hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(23), ..Default::default() },

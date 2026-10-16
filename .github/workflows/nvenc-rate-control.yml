@@ -41,8 +41,8 @@ jobs:
         run: cargo check -p filmcraft-platform -p filmcraft-export -p filmcraft-ui-egui -p filmcraft --all-targets
       - name: Validate CQP settings and codec-specific QP ranges
         run: cargo test -p filmcraft-export --lib cqp && cargo test -p filmcraft-export --lib software_encoders_reject_nvenc_only_rate_controls && cargo test -p filmcraft-export --lib av1_nvenc_controls_reject_full_range_and_non_420_formats
-      - name: Validate NVENC AV1 QP and rate-control configuration
-        run: cargo test -p filmcraft-platform --lib cqp && cargo test -p filmcraft-platform --lib missing_driver_is_an_error_when_nvenc_rate_control_is_required
+      - name: Validate NVENC AV1 QP, buffering and rate-control configuration
+        run: cargo test -p filmcraft-platform --lib cqp && cargo test -p filmcraft-platform --lib lookahead_expands_encoder_ring_before_submission && cargo test -p filmcraft-platform --lib av1_cqp_and_advanced_controls_map_to_nvenc_config && cargo test -p filmcraft-platform --lib missing_driver_is_an_error_when_nvenc_rate_control_is_required
       - name: Validate translated rate-control UI
         run: cargo test -p filmcraft-ui-egui --lib catalogs_are_well_formed && cargo test -p filmcraft-ui-egui --lib nvenc_rate_control_labels_are_translated
       - name: Strict lint
