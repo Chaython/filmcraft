@@ -1606,7 +1606,7 @@ impl VideoEncoder for H264Encoder {
     }
     fn encode(&mut self, f: &EncoderFrame) -> Result<Vec<EncodedPacket>> {
         if f.width != self.w || f.height != self.h {
-            return Err(ExportError::Unsupported(format!("software AV1 frame {}x{} does not match encoder {}x{}", f.width, f.height, self.w, self.h)));
+            return Err(ExportError::Unsupported(format!("software H.264 frame {}x{} does not match encoder {}x{}", f.width, f.height, self.w, self.h)));
         }
         // H.264's conversion path below supports HDR RGB input and attaches the selected
         // ColorSignal metadata. Rejecting f.hdr here was an AV1-only restriction copied
