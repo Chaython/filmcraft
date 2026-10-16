@@ -388,7 +388,9 @@ impl Session {
             if p.spatial_aq {
                 rc.flags |= RC_ENABLE_AQ;
             }
-            if !p.cqp && let Some(la) = p.lookahead {
+            if !p.cqp
+                && let Some(la) = p.lookahead
+            {
                 rc.flags |= RC_ENABLE_LOOKAHEAD;
                 // NVENC lookahead is limited to 31 frames minus the B-frame count.
                 let max_depth = 31u32.saturating_sub(p.bframes).max(1);
