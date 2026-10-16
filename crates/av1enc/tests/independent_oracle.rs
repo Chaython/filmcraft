@@ -49,14 +49,14 @@ fn native_changing_frames_decode_independently() {
                         } else {
                             220
                         }
-                    },
+                    }
                     3 => {
                         if col < 80 {
                             40
                         } else {
                             220
                         }
-                    },
+                    }
                     _ => ((row * 2 + col) % 256) as u8,
                 };
             }
