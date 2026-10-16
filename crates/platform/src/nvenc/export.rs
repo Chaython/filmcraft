@@ -519,5 +519,4 @@ mod tests {
         let bad = ExportSettings { qp: Some(256), ..s };
         assert!(config(Format::Av1, 640, 360, FrameRate::FPS_24, &bad).is_err());
     }
-
 }
