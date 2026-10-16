@@ -433,14 +433,8 @@ mod tests {
 
     #[test]
     fn two_pass_vbr_declines_nvenc_for_software_h264() {
-        let s = ExportSettings {
-            hardware_encoding: HardwareEncoding::Auto,
-            bitrate_mode: BitrateMode::Vbr2Pass,
-            ..Default::default()
-        };
-        assert!(
-            factory_with(Format::H264, 640, 360, FrameRate::FPS_24, &s, |_| panic!("two-pass VBR must use the software encoder")).is_none()
-        );
+        let s = ExportSettings { hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Vbr2Pass, ..Default::default() };
+        assert!(factory_with(Format::H264, 640, 360, FrameRate::FPS_24, &s, |_| panic!("two-pass VBR must use the software encoder")).is_none());
     }
 
     #[test]

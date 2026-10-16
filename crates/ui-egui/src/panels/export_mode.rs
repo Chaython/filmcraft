@@ -894,28 +894,37 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             }
             if nvenc_rate_control {
                 row(ui, t, tl!("Multipass"), |ui| {
-                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp && s.bitrate_mode != BitrateMode::Crf && s.bitrate_mode != BitrateMode::Vbr2Pass, |ui| {
-                        check(ui, reg, "export.video.multipass", &mut s.multipass, "");
-                    });
+                    ui.add_enabled_ui(
+                        s.bitrate_mode != BitrateMode::Cqp && s.bitrate_mode != BitrateMode::Crf && s.bitrate_mode != BitrateMode::Vbr2Pass,
+                        |ui| {
+                            check(ui, reg, "export.video.multipass", &mut s.multipass, "");
+                        },
+                    );
                 });
                 row(ui, t, tl!("Spatial AQ"), |ui| {
-                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Crf && s.bitrate_mode != BitrateMode::Vbr2Pass, |ui| {
-                        check(ui, reg, "export.video.spatialAq", &mut s.spatial_aq, "");
-                    });
+                    ui.add_enabled_ui(
+                        s.bitrate_mode != BitrateMode::Crf && s.bitrate_mode != BitrateMode::Vbr2Pass,
+                        |ui| {
+                            check(ui, reg, "export.video.spatialAq", &mut s.spatial_aq, "");
+                        },
+                    );
                 });
                 row(ui, t, tl!("Lookahead"), |ui| {
-                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp && s.bitrate_mode != BitrateMode::Crf, |ui| {
-                        let mut on = s.lookahead.is_some();
-                        if check(ui, reg, "export.video.lookaheadOn", &mut on, "") {
-                            s.lookahead = on.then_some(16);
-                        }
-                        if let Some(frames) = s.lookahead.as_mut() {
-                            let mut value = *frames as f64;
-                            if drag(ui, reg, "export.video.lookahead", &mut value, 1.0..=30.0, 1.0, " frames", 0) {
-                                *frames = value as u32;
+                    ui.add_enabled_ui(
+                        s.bitrate_mode != BitrateMode::Cqp && s.bitrate_mode != BitrateMode::Crf && s.bitrate_mode != BitrateMode::Vbr2Pass,
+                        |ui| {
+                            let mut on = s.lookahead.is_some();
+                            if check(ui, reg, "export.video.lookaheadOn", &mut on, "") {
+                                s.lookahead = on.then_some(16);
                             }
-                        }
-                    });
+                            if let Some(frames) = s.lookahead.as_mut() {
+                                let mut value = *frames as f64;
+                                if drag(ui, reg, "export.video.lookahead", &mut value, 1.0..=30.0, 1.0, " frames", 0) {
+                                    *frames = value as u32;
+                                }
+                            }
+                        },
+                    );
                 });
             }
         }
