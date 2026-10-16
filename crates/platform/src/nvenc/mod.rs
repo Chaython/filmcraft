@@ -1052,5 +1052,4 @@ mod tests {
         cfg.qp = 52;
         assert!(validate_qp(&cfg).is_err());
     }
-
 }
