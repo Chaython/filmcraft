@@ -869,16 +869,16 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             if nvenc_rate_control {
                 row(ui, t, tl!("Multipass"), |ui| {
                     ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp, |ui| {
-                        check(ui, reg, "export.video.multipass", &mut s.multipass, tl!("Enable multipass rate control"));
+                        check(ui, reg, "export.video.multipass", &mut s.multipass, "");
                     });
                 });
                 row(ui, t, tl!("Spatial AQ"), |ui| {
-                    check(ui, reg, "export.video.spatialAq", &mut s.spatial_aq, tl!("Enable spatial adaptive quantization"));
+                    check(ui, reg, "export.video.spatialAq", &mut s.spatial_aq, "");
                 });
                 row(ui, t, tl!("Lookahead"), |ui| {
                     ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp, |ui| {
                         let mut on = s.lookahead.is_some();
-                        if check(ui, reg, "export.video.lookaheadOn", &mut on, tl!("Enable lookahead")) {
+                        if check(ui, reg, "export.video.lookaheadOn", &mut on, "") {
                             s.lookahead = on.then_some(16);
                         }
                         if let Some(frames) = s.lookahead.as_mut() {
