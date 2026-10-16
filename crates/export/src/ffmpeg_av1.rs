@@ -612,6 +612,38 @@ mod tests {
     }
 
     #[test]
+    fn odd_dimensions_keep_high_depth_chroma_planes_and_bitstream_dimensions() {
+        let strict = std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() == Ok("1");
+        let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|v| !v.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+        if !Command::new(&ffmpeg).arg("-version").output().is_ok_and(|out| out.status.success()) {
+            assert!(!strict, "odd-dimension AV1 conformance requires FFmpeg/libdav1d");
+            return;
+        }
+        let (w, h) = (65u32, 63u32);
+        let rgba = vec![127u8; (w * h * 4) as usize];
+        for fmt in [Av1PixelFormat::Yuv420p12, Av1PixelFormat::Yuv422p10, Av1PixelFormat::Yuv444p12] {
+            let settings = ExportSettings { format: Format::Av1, av1_pixel_format: fmt, bitrate_mode: BitrateMode::Crf, crf: 36.0, ..Default::default() };
+            let mut encoder = FfmpegAv1Encoder::new(w, h, FrameRate::FPS_24, &settings).expect("odd-dimension libaom");
+            for index in 0..2 {
+                encoder.encode(&EncoderFrame { width: w, height: h, rgba: &rgba, hdr: None, index }).expect("write odd-size image");
+            }
+            assert_eq!(encoder.flush().expect("AV1 odd-size encode").len(), 2);
+            assert!(encoder.final_sample_entry().expect("validated sequence header").is_some());
+            let decoded = Command::new(&ffmpeg)
+                .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+                .arg(&encoder.ivf_path)
+                .args(["-pix_fmt", fmt.ffmpeg_name(), "-f", "rawvideo", "-"])
+                .output()
+                .expect("independent AV1 odd-size decoder");
+            assert!(decoded.status.success(), "{}: invalid odd-size AV1: {}", fmt.label(), String::from_utf8_lossy(&decoded.stderr));
+            let (sx, sy) = fmt.chroma_shift();
+            let expected_samples = (w * h) as usize + 2 * (w as usize).div_ceil(1 << sx) * (h as usize).div_ceil(1 << sy);
+            let bytes_per_sample = if fmt.bit_depth() > 8 { 2 } else { 1 };
+            assert_eq!(decoded.stdout.len(), 2 * expected_samples * bytes_per_sample, "{}: odd-sized chroma plane is cropped or padded incorrectly", fmt.label());
+        }
+    }
+
+    #[test]
     fn precision_and_range_codes_are_bounded() {
         for depth in [8, 10, 12] {
             assert_eq!(quantize(0.0, depth, false, false), 16u16 << (depth - 8));
