@@ -370,9 +370,7 @@ impl Session {
             rc.version = NV_ENC_RC_PARAMS_VER;
             if p.cqp {
                 rc.rateControlMode = NV_ENC_PARAMS_RC_CONSTQP;
-                let max_qp = if p.codec == Codec::Av1 { 255 } else { 51 };
-                let qp = p.qp.min(max_qp);
-                rc.constQP = NV_ENC_QP { qpInterP: qp, qpInterB: qp, qpIntra: qp };
+                rc.constQP = NV_ENC_QP { qpInterP: p.qp, qpInterB: p.qp, qpIntra: p.qp };
             } else {
                 rc.rateControlMode = if p.cbr { NV_ENC_PARAMS_RC_CBR } else { NV_ENC_PARAMS_RC_VBR };
                 rc.averageBitRate = p.bitrate.saturating_mul(1000);
