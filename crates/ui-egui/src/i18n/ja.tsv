@@ -3615,3 +3615,9 @@
 	Multipass	マルチパス
 	Quantizer (QP)	量子化パラメーター (QP)
 	Spatial AQ	空間適応量子化 (AQ)
+	Full Range	フルレンジ
+	Pixel Format	ピクセル形式
+	AV1 1080p Full HD	AV1 1080p フルHD
+	AV1 1920×1080, VBR 1 pass, 14 Mbps target, AAC 320 kbps	AV1 1920×1080、VBR 1パス、目標14 Mbps、AAC 320 kbps
+	AV1 2160p 4K Ultra HD	AV1 2160p 4K 超高精細
+	AV1 3840×2160, VBR 1 pass, 35 Mbps target, AAC 320 kbps	AV1 3840×2160、VBR 1パス、目標35 Mbps、AAC 320 kbps
