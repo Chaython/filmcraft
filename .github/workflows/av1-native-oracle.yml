@@ -1,0 +1,36 @@
+name: Native AV1 external conformance
+
+on:
+  push:
+    branches: [av1-chroma-cdf-focused]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  independent-oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install independent AV1 oracle
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          ffmpeg -hide_banner -decoders | grep -F libdav1d
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: AV1 native independent conformance
+        env:
+          FILMCRAFT_REQUIRE_AV1_ORACLE: "1"
+        run: cargo test -p filmcraft-av1enc --test independent_oracle -- --nocapture
+      - name: AV1 crate tests and strict lint
+        run: |
+          cargo test -p filmcraft-av1enc
+          cargo clippy -p filmcraft-av1enc --all-targets -- -D warnings
