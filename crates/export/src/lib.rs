@@ -745,6 +745,14 @@ impl ExportSettings {
                 return Err(ExportError::Unsupported("NVENC AV1 CQP supports only limited-range 4:2:0 8-bit or 10-bit output".into()));
             }
         }
+        if self.format == Format::H264
+            && self.bitrate_mode == BitrateMode::Vbr2Pass
+            && (self.multipass || self.spatial_aq || self.lookahead.is_some())
+        {
+            return Err(ExportError::Unsupported(
+                "H.264 software two-pass VBR cannot be combined with NVENC-only rate controls".into(),
+            ));
+        }
         if self.bitrate_mode == BitrateMode::Cqp && (self.multipass || self.lookahead.is_some()) {
             return Err(ExportError::Unsupported("CQP cannot be combined with multipass or lookahead".into()));
         }

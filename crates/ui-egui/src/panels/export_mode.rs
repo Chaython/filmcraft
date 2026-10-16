@@ -801,7 +801,7 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     .collect();
                 if let Some(i) = combo(ui, reg, "export.video.bitrateMode", s.bitrate_mode.label(), &labels, 140.0) {
                     s.bitrate_mode = o[i];
-                    if s.bitrate_mode == BitrateMode::Crf {
+                    if matches!(s.bitrate_mode, BitrateMode::Crf | BitrateMode::Vbr2Pass) {
                         s.multipass = false;
                         s.spatial_aq = false;
                         s.lookahead = None;
@@ -889,12 +889,12 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             }
             if nvenc_rate_control {
                 row(ui, t, tl!("Multipass"), |ui| {
-                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp && s.bitrate_mode != BitrateMode::Crf, |ui| {
+                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp && s.bitrate_mode != BitrateMode::Crf && s.bitrate_mode != BitrateMode::Vbr2Pass, |ui| {
                         check(ui, reg, "export.video.multipass", &mut s.multipass, "");
                     });
                 });
                 row(ui, t, tl!("Spatial AQ"), |ui| {
-                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Crf, |ui| {
+                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Crf && s.bitrate_mode != BitrateMode::Vbr2Pass, |ui| {
                         check(ui, reg, "export.video.spatialAq", &mut s.spatial_aq, "");
                     });
                 });

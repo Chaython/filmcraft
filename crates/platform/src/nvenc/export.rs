@@ -173,7 +173,7 @@ fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -
     if (hevc || av1) && (hdr && (s.signal.primaries != 9 || s.signal.matrix != 9) || !hdr && s.signal != ColorSignal::default()) {
         return Err(format!("the colour signal {:?} (H.265 and AV1 here are BT.709, or BT.2020 with PQ / HLG)", s.signal));
     }
-    if !matches!(s.h264_pass, H264Pass::Single) || ((hevc || av1) && s.bitrate_mode == BitrateMode::Vbr2Pass) {
+    if !matches!(s.h264_pass, H264Pass::Single) || s.bitrate_mode == BitrateMode::Vbr2Pass {
         return Err("two-pass VBR".into());
     }
     if s.bitrate_mode == BitrateMode::Crf {
@@ -429,6 +429,18 @@ mod tests {
         assert!(cfg.multipass);
         assert!(cfg.spatial_aq);
         assert_eq!(cfg.lookahead, Some(16));
+    }
+
+    #[test]
+    fn two_pass_vbr_declines_nvenc_for_software_h264() {
+        let s = ExportSettings {
+            hardware_encoding: HardwareEncoding::Auto,
+            bitrate_mode: BitrateMode::Vbr2Pass,
+            ..Default::default()
+        };
+        assert!(
+            factory_with(Format::H264, 640, 360, FrameRate::FPS_24, &s, |_| panic!("two-pass VBR must use the software encoder")).is_none()
+        );
     }
 
     #[test]

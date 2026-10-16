@@ -598,6 +598,23 @@ fn cqp_rejects_multipass_and_lookahead() {
 }
 
 #[test]
+fn h264_two_pass_rejects_nvenc_only_controls() {
+    let settings = ExportSettings {
+        format: Format::H264,
+        hardware_encoding: HardwareEncoding::Auto,
+        bitrate_mode: BitrateMode::Vbr2Pass,
+        spatial_aq: true,
+        ..Default::default()
+    };
+    match settings.validate() {
+        Err(ExportError::Unsupported(message)) => {
+            assert!(message.contains("two-pass VBR cannot be combined with NVENC-only rate controls"), "{message}");
+        }
+        other => panic!("software two-pass VBR with NVENC-only controls was accepted: {other:?}"),
+    }
+}
+
+#[test]
 fn av1_nvenc_controls_reject_full_range_and_non_420_formats() {
     let cases = [
         ExportSettings {
