@@ -57,7 +57,7 @@ cargo test -p filmcraft-platform --test av1_hardware intel_qsv_av1_real_gpu_acce
 Remove-Item Env:FILMCRAFT_TEST_INTEL_AV1
 ```
 
-NVIDIA NVENC (Main 8-bit, BT.709 SDR Main10 and HDR10 PQ Main10) can be tested on an AV1-capable NVIDIA Windows GPU:
+NVIDIA NVENC (Main 8-bit, BT.709 SDR Main10, BT.2020 PQ Main10, and BT.2020 HLG Main10) can be tested on an AV1-capable NVIDIA Windows GPU:
 
 ```powershell
 $env:FILMCRAFT_TEST_NVENC_AV1 = "1"
