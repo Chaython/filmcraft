@@ -706,6 +706,13 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
         f @ (Format::H264 | Format::Hevc | Format::Av1) => {
             let hevc = f == Format::Hevc;
             let av1 = f == Format::Av1;
+            let av1_nvenc_eligible = !s.av1_full_range
+                && matches!(s.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10);
+            // This fork's AV1 NVENC path is currently Windows-only. CQP and the advanced controls
+            // must not be offered when the export would silently fall back to software.
+            let nvenc_rate_control = cfg!(target_os = "windows")
+                && (hevc || s.hardware_encoding == HardwareEncoding::Auto)
+                && (!av1 || av1_nvenc_eligible);
             if hevc {
                 // the hardware encoder writes Main (8-bit 4:2:0), or Main 10 for HDR sequences where it can; level chosen by the encoder
                 let label = match (filmcraft_engine::export::hdr_available(Format::Hevc), seq_hdr && !s.sdr) {
@@ -733,7 +740,9 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     check(ui, reg, "export.video.av1FullRange", &mut s.av1_full_range, "Full (0–max) instead of studio/video levels");
                 });
                 row(ui, t, tl!("Encoder"), |ui| {
-                    if s.av1_pixel_format != Av1PixelFormat::Yuv420p8
+                    if s.bitrate_mode == BitrateMode::Cqp {
+                        ui.label("NVIDIA NVENC (CQP; hardware required)");
+                    } else if s.av1_pixel_format != Av1PixelFormat::Yuv420p8
                         || s.av1_full_range
                         || s.hardware_encoding == HardwareEncoding::Off
                         || s.bitrate_mode == BitrateMode::Crf
@@ -762,15 +771,18 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                 });
             }
             row(ui, t, tl!("Bitrate Encoding"), |ui| {
-                // AV1 CRF uses the software encoder; NVENC/AMF/QSV may decline that mode.
-                let o = [BitrateMode::Cbr, BitrateMode::Vbr1Pass, BitrateMode::Vbr2Pass, BitrateMode::Crf];
+                // CQP and the advanced controls are NVENC-only; never let them silently select software.
+                let o = [BitrateMode::Cbr, BitrateMode::Vbr1Pass, BitrateMode::Vbr2Pass, BitrateMode::Crf, BitrateMode::Cqp];
                 let labels: Vec<(String, bool)> = o
                     .iter()
                     .map(|m| {
-                        (
-                            m.label().to_string(),
-                            !((hevc && matches!(m, BitrateMode::Vbr2Pass | BitrateMode::Crf)) || (av1 && matches!(m, BitrateMode::Vbr2Pass))),
-                        )
+                        let enabled = match m {
+                            BitrateMode::Vbr2Pass => !hevc && !av1,
+                            BitrateMode::Crf => !hevc,
+                            BitrateMode::Cqp => nvenc_rate_control,
+                            _ => true,
+                        };
+                        (m.label().to_string(), enabled)
                     })
                     .collect();
                 if let Some(i) = combo(ui, reg, "export.video.bitrateMode", s.bitrate_mode.label(), &labels, 140.0) {
@@ -783,6 +795,15 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     let maximum = if av1 { 63.0 } else { 51.0 };
                     if drag(ui, reg, "export.video.crf", &mut crf, 0.0..=maximum, 0.1, "", 0) {
                         s.crf = crf.round() as f32;
+                    }
+                });
+            } else if s.bitrate_mode == BitrateMode::Cqp {
+                row(ui, t, tl!("Quantizer (QP)"), |ui| {
+                    let default_qp = if av1 { 128.0 } else { 23.0 };
+                    let mut qp = s.qp.unwrap_or(default_qp as u32) as f64;
+                    let maximum = if av1 { 255.0 } else { 51.0 };
+                    if drag(ui, reg, "export.video.qp", &mut qp, 0.0..=maximum, 1.0, "", 0) {
+                        s.qp = Some(qp.round() as u32);
                     }
                 });
             } else if let Some(bpp) = s.adaptive_bitrate {
@@ -828,13 +849,45 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             if !hevc
                 && (!av1
                     || (s.av1_pixel_format == Av1PixelFormat::Yuv420p8 && !s.av1_full_range)
-                    || (s.av1_pixel_format == Av1PixelFormat::Yuv420p10 && seq_hdr && !s.sdr))
+                    || s.av1_pixel_format == Av1PixelFormat::Yuv420p10)
             {
                 row(ui, t, "Hardware Encoding", |ui| {
                     let mut on = s.hardware_encoding == HardwareEncoding::Auto;
                     if check(ui, reg, "export.video.hardwareEncoding", &mut on, "Use the hardware encoder when available") {
                         s.hardware_encoding = if on { HardwareEncoding::Auto } else { HardwareEncoding::Off };
+                        if !on {
+                            if s.bitrate_mode == BitrateMode::Cqp {
+                                s.bitrate_mode = BitrateMode::Vbr1Pass;
+                            }
+                            s.multipass = false;
+                            s.spatial_aq = false;
+                            s.lookahead = None;
+                        }
                     }
+                });
+            }
+            if nvenc_rate_control {
+                row(ui, t, tl!("Multipass"), |ui| {
+                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp, |ui| {
+                        check(ui, reg, "export.video.multipass", &mut s.multipass, tl!("Enable multipass rate control"));
+                    });
+                });
+                row(ui, t, tl!("Spatial AQ"), |ui| {
+                    check(ui, reg, "export.video.spatialAq", &mut s.spatial_aq, tl!("Enable spatial adaptive quantization"));
+                });
+                row(ui, t, tl!("Lookahead"), |ui| {
+                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp, |ui| {
+                        let mut on = s.lookahead.is_some();
+                        if check(ui, reg, "export.video.lookaheadOn", &mut on, tl!("Enable lookahead")) {
+                            s.lookahead = on.then_some(16);
+                        }
+                        if let Some(frames) = s.lookahead.as_mut() {
+                            let mut value = *frames as f64;
+                            if drag(ui, reg, "export.video.lookahead", &mut value, 1.0..=30.0, 1.0, " frames", 0) {
+                                *frames = value as u32;
+                            }
+                        }
+                    });
                 });
             }
         }
