@@ -54,4 +54,4 @@ jobs:
       - name: Export pipeline unit tests
         run: cargo test -p filmcraft-export --lib -- --test-threads=1
       - name: Strict lint
-        run: cargo clippy -p filmcraft-gpu -p filmcraft-export -p filmcraft-cli -p filmcraft --all-targets -- -D warnings
+        run: cargo clippy --no-deps -p filmcraft-gpu -p filmcraft-export -p filmcraft-cli -p filmcraft --all-targets -- -D warnings
