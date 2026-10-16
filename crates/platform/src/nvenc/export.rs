@@ -404,6 +404,21 @@ mod tests {
     }
 
     #[test]
+    fn missing_driver_is_an_error_when_nvenc_rate_control_is_required() {
+        let s = ExportSettings {
+            hardware_encoding: HardwareEncoding::Auto,
+            bitrate_mode: BitrateMode::Cqp,
+            qp: Some(23),
+            ..Default::default()
+        };
+        let result = factory_with(Format::H264, 640, 360, FrameRate::FPS_24, &s, |_| Err("no NVIDIA encoder driver".into()));
+        let Some(Err(ExportError::Unsupported(message))) = result else {
+            panic!("CQP must not fall back to software H.264");
+        };
+        assert!(message.contains("NVENC"), "{message}");
+    }
+
+    #[test]
     fn missing_or_rejecting_driver_declines_for_software_fallback() {
         let s = ExportSettings { hardware_encoding: HardwareEncoding::Auto, ..Default::default() };
         let mut attempted = false;
