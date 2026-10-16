@@ -733,7 +733,11 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     check(ui, reg, "export.video.av1FullRange", &mut s.av1_full_range, "Full (0–max) instead of studio/video levels");
                 });
                 row(ui, t, tl!("Encoder"), |ui| {
-                    if s.av1_pixel_format != Av1PixelFormat::Yuv420p8 || s.av1_full_range || s.hardware_encoding == HardwareEncoding::Off || s.bitrate_mode == BitrateMode::Crf {
+                    if s.av1_pixel_format != Av1PixelFormat::Yuv420p8
+                        || s.av1_full_range
+                        || s.hardware_encoding == HardwareEncoding::Off
+                        || s.bitrate_mode == BitrateMode::Crf
+                    {
                         ui.label("FFmpeg / libaom-av1 (software)");
                     } else {
                         ui.label("Hardware (Auto) / FFmpeg libaom fallback");
