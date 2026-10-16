@@ -393,7 +393,7 @@ impl FfmpegAv1Encoder {
             if accounted > len {
                 return Err(ExportError::Encode("AV1 IVF frame size exceeds file length".into()));
             }
-            let timestamp = u64::from_le_bytes(fh[4..12].try_into().unwrap());
+            let timestamp = u64::from_le_bytes([fh[4], fh[5], fh[6], fh[7], fh[8], fh[9], fh[10], fh[11]]);
             if timestamp != emitted {
                 return Err(ExportError::Encode(format!("libaom IVF timeline is not consecutive: frame {emitted} has timestamp {timestamp}")));
             }
@@ -523,7 +523,7 @@ mod tests {
         let max_pixels = 8192usize * 4320;
         let bytes_per_12bit_444_frame = max_pixels * 3 * 2;
         assert!(MAX_FRAME_BYTES > bytes_per_12bit_444_frame, "8K 12-bit 4:4:4 must not be rejected for exceeding the old 128 MiB packet cap");
-        assert!(MAX_FRAME_BYTES <= 512 * 1024 * 1024, "untrusted IVF packets still need a bounded allocation");
+        const { assert!(MAX_FRAME_BYTES <= 512 * 1024 * 1024, "untrusted IVF packets still need a bounded allocation"); }
     }
 
     #[test]
