@@ -68,22 +68,28 @@ fn native_changing_frames_decode_independently() {
         packets.push(packet.data);
         input_planes.push(y);
     }
-    let bytes = ivf(w as u16, h as u16, 24, &packets);
     let path = filmcraft_testkit::temp_path(&filmcraft_testkit::fixtures_dir("av1enc-external-oracle").join("changing.ivf"));
-    std::fs::write(&path, bytes).unwrap();
-    let decoded = Command::new(ffmpeg)
-        .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-f", "ivf", "-i"])
-        .arg(&path)
-        .args(["-pix_fmt", "yuv420p", "-f", "rawvideo", "-"])
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
-    let _ = std::fs::remove_file(&path);
-    assert!(decoded.status.success(), "independent libdav1d rejected native AV1 output: {}", String::from_utf8_lossy(&decoded.stderr));
     let frame_size = w * h * 3 / 2;
-    assert_eq!(decoded.stdout.len(), 5 * frame_size, "independent decoder must produce 5 complete frames");
-    for (i, frame) in decoded.stdout.chunks_exact(frame_size).enumerate() {
-        let psnr = filmcraft_av1enc::compute_psnr(&input_planes[i], &frame[..w * h]).unwrap();
-        assert!(psnr > 9.0, "independently decoded native AV1 frame {i} has poor luma quality: {psnr:.2} dB");
+    for count in 1..=packets.len() {
+        std::fs::write(&path, ivf(w as u16, h as u16, 24, &packets[..count])).unwrap();
+        let decoded = Command::new(&ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-f", "ivf", "-i"])
+            .arg(&path)
+            .args(["-pix_fmt", "yuv420p", "-f", "rawvideo", "-"])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            decoded.status.success(),
+            "independent libdav1d first rejected native AV1 at prefix {count}, packet lengths {:?}: {}",
+            packets.iter().map(Vec::len).collect::<Vec<_>>(),
+            String::from_utf8_lossy(&decoded.stderr)
+        );
+        assert_eq!(decoded.stdout.len(), count * frame_size, "independent decoder must produce exactly {count} frames");
+        for (i, frame) in decoded.stdout.chunks_exact(frame_size).enumerate() {
+            let psnr = filmcraft_av1enc::compute_psnr(&input_planes[i], &frame[..w * h]).unwrap();
+            assert!(psnr > 9.0, "independently decoded native AV1 frame {i} has poor luma quality: {psnr:.2} dB");
+        }
     }
 }
