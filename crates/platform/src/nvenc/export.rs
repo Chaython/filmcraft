@@ -201,6 +201,11 @@ fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -
     let fps = (num, den);
     let kbps = s.bitrate_kbps.max(100);
     let cqp = s.bitrate_mode == BitrateMode::Cqp;
+    let max_qp = if av1 { 255 } else { 51 };
+    if cqp && s.qp.is_some_and(|qp| qp > max_qp) {
+        return Err(format!("{} CQP must be between 0 and {max_qp}", format.label()));
+    }
+    let qp = s.qp.unwrap_or(if av1 { 128 } else { 23 });
     Ok(Config {
         width: w,
         height: h,
@@ -209,7 +214,7 @@ fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -
         max_bitrate_kbps: s.max_bitrate_kbps.filter(|m| *m >= kbps).unwrap_or_else(|| kbps.saturating_add(kbps / 2)),
         cbr: s.bitrate_mode == BitrateMode::Cbr,
         cqp,
-        qp: s.qp.unwrap_or(if av1 { 128 } else { 23 }).min(if av1 { 255 } else { 51 }),
+        qp,
         multipass: s.multipass && !cqp,
         spatial_aq: s.spatial_aq,
         lookahead: if cqp { None } else { s.lookahead },
