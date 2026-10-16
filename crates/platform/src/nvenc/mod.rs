@@ -593,6 +593,28 @@ impl Nvenc {
     }
 }
 
+/// Finish in-flight NVENC work before Session::drop destroys input/output buffers.
+/// An interrupted export can still have delayed pictures queued on the GPU.
+/// Derived from storytold/filmcraft#1834; applies to H.264, HEVC and AV1 alike.
+impl Drop for Nvenc {
+    fn drop(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+        if let Err(e) = self.session.end_of_stream() {
+            log::warn!("NVENC cleanup failed to signal EOS: {e}");
+            return;
+        }
+        // Discard the encoded packets: an aborted export must release the device's
+        // pending references before the session frees its buffers.
+        while let Some(slot) = self.pending.pop_front() {
+            if let Err(e) = self.session.read(slot) {
+                log::warn!("NVENC cleanup failed to drain slot {slot}: {e}");
+            }
+        }
+    }
+}
+
 /// Copy planar 4:2:0 into an NV12 input buffer.
 fn fill_nv12(l: Locked<'_>, y: &[u8], u: &[u8], v: &[u8], w: usize, h: usize) {
     let pitch = l.pitch;
