@@ -125,6 +125,17 @@ impl Default for Config {
     }
 }
 
+/// Validate the codec-specific NVENC constant-QP range without opening a GPU session.
+fn validate_qp(cfg: &Config) -> Result<(), String> {
+    if cfg.cqp {
+        let max_qp = if cfg.profile.codec() == Codec::Av1 { 255 } else { 51 };
+        if cfg.qp > max_qp {
+            return Err(format!("CQP QP {} is outside 0..={max_qp} for {:?}", cfg.qp, cfg.profile));
+        }
+    }
+    Ok(())
+}
+
 /// One encoded picture in decoding order.
 pub struct Packet {
     /// Length-prefixed (4 bytes) NAL units, without parameter sets or access unit delimiters.
@@ -380,6 +391,7 @@ impl Nvenc {
     }
 
     fn open(cfg: &Config, signal: &Signal, rgba_input: bool) -> Result<Self, String> {
+        validate_qp(cfg)?;
         let (w, h) = (cfg.width, cfg.height);
         if w == 0 || h == 0 || w % 2 != 0 || h % 2 != 0 {
             return Err(format!("{w}x{h}: NVENC needs even dimensions"));
@@ -1027,4 +1039,18 @@ mod tests {
             assert_eq!(p.codec(), Codec::H264);
         }
     }
+    #[test]
+    fn cqp_qp_range_is_codec_specific_and_rejects_out_of_range_values() {
+        let mut cfg = Config { profile: Profile::Av1Main, cqp: true, qp: 255, ..Default::default() };
+        assert!(validate_qp(&cfg).is_ok());
+        cfg.qp = 256;
+        assert!(validate_qp(&cfg).is_err());
+
+        cfg.profile = Profile::High;
+        cfg.qp = 51;
+        assert!(validate_qp(&cfg).is_ok());
+        cfg.qp = 52;
+        assert!(validate_qp(&cfg).is_err());
+    }
+
 }
