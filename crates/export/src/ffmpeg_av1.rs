@@ -229,7 +229,9 @@ fn av1_config(packet: &[u8], requested: Av1PixelFormat, signal: ColorSignal, ful
     if seq.profile != av1_profile(requested) {
         return Err(ExportError::Encode(format!(
             "libaom AV1 profile {} does not match requested {} (expected profile {})",
-            seq.profile, requested.label(), av1_profile(requested)
+            seq.profile,
+            requested.label(),
+            av1_profile(requested)
         )));
     }
     let color = seq.color;
