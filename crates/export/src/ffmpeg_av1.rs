@@ -548,6 +548,11 @@ pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, settings: &Expor
     if format != Format::Av1 {
         return None;
     }
+    if settings.bitrate_mode == BitrateMode::Cqp || settings.multipass || settings.spatial_aq || settings.lookahead.is_some() {
+        return Some(Err(crate::ExportError::Unsupported(
+            "CQP, multipass, spatial AQ and lookahead require an available NVENC AV1 encoder; the software AV1 encoder cannot honor these settings".into(),
+        )));
+    }
     Some(FfmpegAv1Encoder::new(w, h, rate, settings).map(|v| Box::new(v) as Box<dyn VideoEncoder>))
 }
 
