@@ -547,7 +547,11 @@ impl FrameRenderer for FakeRenderer {
 fn av1_cqp_uses_the_full_av1_qp_range_and_rejects_software_fallbacks() {
     let mut s =
         ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(255), ..Default::default() };
-    assert_eq!(s.validate().is_ok(), cfg!(all(target_os = "windows", target_arch = "x86_64")), "valid AV1 CQP is accepted only on the supported Windows x64 NVENC path");
+    assert_eq!(
+        s.validate().is_ok(),
+        cfg!(all(target_os = "windows", target_arch = "x86_64")),
+        "valid AV1 CQP is accepted only on the supported Windows x64 NVENC path"
+    );
 
     s.qp = Some(256);
     assert!(s.validate().is_err(), "AV1 CQP above 255 must be rejected");
@@ -569,7 +573,11 @@ fn av1_cqp_uses_the_full_av1_qp_range_and_rejects_software_fallbacks() {
 fn h264_cqp_uses_the_h264_qp_range() {
     let mut s =
         ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(51), ..Default::default() };
-    assert_eq!(s.validate().is_ok(), cfg!(all(target_os = "windows", target_arch = "x86_64")), "valid H.264 CQP is accepted only on the supported Windows x64 NVENC path");
+    assert_eq!(
+        s.validate().is_ok(),
+        cfg!(all(target_os = "windows", target_arch = "x86_64")),
+        "valid H.264 CQP is accepted only on the supported Windows x64 NVENC path"
+    );
     s.qp = Some(52);
     assert!(s.validate().is_err(), "H.264 CQP above 51 must be rejected");
 }
