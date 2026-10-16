@@ -222,6 +222,7 @@ pub struct FfmpegAv1Encoder {
     rate: FrameRate,
     bitrate_mode: BitrateMode,
     bitrate_kbps: u32,
+    max_bitrate_kbps: Option<u32>,
     crf: f32,
     keyint: u32,
     frames: u64,
@@ -281,6 +282,7 @@ impl FfmpegAv1Encoder {
             rate,
             bitrate_mode: settings.bitrate_mode,
             bitrate_kbps: settings.bitrate_kbps.max(100),
+            max_bitrate_kbps: settings.max_bitrate_kbps.filter(|&max| max >= settings.bitrate_kbps.max(100)),
             crf: settings.crf,
             keyint: settings.keyframe_distance.unwrap_or(48).max(1),
             frames: 0,
@@ -341,8 +343,20 @@ impl FfmpegAv1Encoder {
             BitrateMode::Crf => {
                 cmd.args(["-b:v", "0", "-crf"]).arg(format!("{}", self.crf.clamp(0.0, 63.0).round()));
             }
+            BitrateMode::Cbr => {
+                // A target alone chooses VBR in libaom. Apply explicit VBV bounds
+                // when the user requests constant bitrate; short GOPs may still
+                // fluctuate, but the rate-control mode is no longer silently ignored.
+                let kbps = format!("{}k", self.bitrate_kbps);
+                let buffer = format!("{}k", self.bitrate_kbps.saturating_mul(2));
+                cmd.args(["-b:v", &kbps, "-minrate", &kbps, "-maxrate", &kbps, "-bufsize", &buffer]);
+            }
             _ => {
                 cmd.arg("-b:v").arg(format!("{}k", self.bitrate_kbps));
+                if let Some(max) = self.max_bitrate_kbps {
+                    cmd.arg("-maxrate").arg(format!("{max}k"));
+                    cmd.arg("-bufsize").arg(format!("{}k", max.saturating_mul(2)));
+                }
             }
         }
         // libaom does not consistently copy the input stream's color fields into the
