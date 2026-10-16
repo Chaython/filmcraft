@@ -273,10 +273,18 @@ fn factory_with(
     if s.hardware_encoding != HardwareEncoding::Auto || format != Format::H264 {
         return None;
     }
+    let requires_nvenc_rate_control =
+        s.bitrate_mode == BitrateMode::Cqp || s.multipass || s.spatial_aq || s.lookahead.is_some();
     let declined = |why: &str| {
         log::info!("hardware encoding declined: {why}");
         filmcraft_export::note_hw_encode_declined();
-        None
+        if requires_nvenc_rate_control {
+            Some(Err(ExportError::Unsupported(format!(
+                "H.264 CQP, multipass, spatial AQ and lookahead require an available NVENC encoder; software H.264 cannot honor these settings: {why}"
+            ))))
+        } else {
+            None
+        }
     };
     let cfg = match config(format, w, h, rate, s) {
         Ok(c) => c,
@@ -327,6 +335,8 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
     {
         return None;
     }
+    let requires_nvenc_rate_control =
+        s.bitrate_mode == BitrateMode::Cqp || s.multipass || s.spatial_aq || s.lookahead.is_some();
     let declined = |why: &str| {
         log::info!("hardware AV1 encoding declined: {why}");
         filmcraft_export::note_hw_encode_declined();
@@ -334,7 +344,7 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
     };
     let cfg = match config(Format::Av1, w, h, rate, s) {
         Ok(c) => c,
-        Err(why) if !s.signal.is_hdr() => {
+        Err(why) if !s.signal.is_hdr() && !requires_nvenc_rate_control => {
             log::info!("NVENC AV1 declined; trying the SDR software encoder: {why}");
             return None;
         }
@@ -346,11 +356,11 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
             Some(Ok(Box::new(new_encoder(enc, w, h, rate, s.signal))))
         }
         // no AV1 encoder here at all: not a hardware attempt, the export's own "encoder not available" error
-        Err(why) if !super::av1_available() => {
+        Err(why) if !super::av1_available() && !requires_nvenc_rate_control => {
             log::info!("no hardware AV1 encoder: {why}");
             None
         }
-        Err(why) if !s.signal.is_hdr() || s.av1_pixel_format == filmcraft_export::Av1PixelFormat::Yuv420p10 => {
+        Err(why) if (!s.signal.is_hdr() || s.av1_pixel_format == filmcraft_export::Av1PixelFormat::Yuv420p10) && !requires_nvenc_rate_control => {
             log::info!("NVENC AV1 session unavailable; trying software encoder: {why}");
             None
         }
