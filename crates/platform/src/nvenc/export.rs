@@ -334,8 +334,7 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
     {
         return None;
     }
-    let requires_nvenc_rate_control =
-        s.bitrate_mode == BitrateMode::Cqp || s.multipass || s.spatial_aq || s.lookahead.is_some();
+    let requires_nvenc_rate_control = s.bitrate_mode == BitrateMode::Cqp || s.multipass || s.spatial_aq || s.lookahead.is_some();
     let declined = |why: &str| {
         log::info!("hardware AV1 encoding declined: {why}");
         filmcraft_export::note_hw_encode_declined();
