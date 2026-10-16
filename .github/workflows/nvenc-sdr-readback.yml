@@ -1,0 +1,47 @@
+name: NVENC SDR GPU readback integration
+
+on:
+  push:
+    branches: [nvenc-av1-sdr-gpu-readback]
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/gpu/**"
+      - "crates/export/**"
+      - "apps/filmcraft*/**"
+      - "crates/ui-egui/examples/bench/sections.rs"
+      - "Cargo.lock"
+      - ".github/workflows/nvenc-sdr-readback.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gpu-sdr:
+    name: SDR readback / HDR-safe fallback (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Check GPU, export, desktop and CLI
+        run: cargo check -p filmcraft-gpu -p filmcraft-export -p filmcraft-cli -p filmcraft --all-targets
+      - name: GPU compositor unit tests
+        run: cargo test -p filmcraft-gpu --lib
+      - name: GPU / CPU export parity tests
+        run: cargo test -p filmcraft-gpu --test export_pipeline
+      - name: Export pipeline unit tests
+        run: cargo test -p filmcraft-export --lib
+      - name: Strict lint
+        run: cargo clippy -p filmcraft-gpu -p filmcraft-export -p filmcraft-cli -p filmcraft --all-targets -- -D warnings
