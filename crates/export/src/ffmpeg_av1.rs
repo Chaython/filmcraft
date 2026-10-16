@@ -3,7 +3,7 @@
 //! Frames are spooled to a temporary raw-video file instead of held in memory.
 use std::fs::{File, OpenOptions, remove_file};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,15 +19,22 @@ static FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const MAX_FRAME_BYTES: usize = 384 * 1024 * 1024;
 
 fn unique_temp_file() -> Result<(File, PathBuf, PathBuf)> {
+    // Long 4K/8K high-precision exports can spool hundreds of GiB. Allow a
+    // dedicated scratch volume instead of silently filling the system drive.
+    let dir = std::env::var_os("FILMCRAFT_AV1_TEMP_DIR").filter(|p| !p.is_empty()).map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    unique_temp_file_in(&dir)
+}
+
+fn unique_temp_file_in(dir: &Path) -> Result<(File, PathBuf, PathBuf)> {
     for _ in 0..32 {
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| ExportError::Io(e.to_string()))?.as_nanos();
         let id = FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let base = std::env::temp_dir().join(format!("filmcraft-av1-{}-{stamp}-{id}", std::process::id()));
+        let base = dir.join(format!("filmcraft-av1-{}-{stamp}-{id}", std::process::id()));
         let raw = base.with_extension("raw");
         match OpenOptions::new().create_new(true).write(true).open(&raw) {
             Ok(file) => return Ok((file, raw, base.with_extension("ivf"))),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(ExportError::Io(format!("AV1 temporary input file: {e}"))),
+            Err(e) => return Err(ExportError::Io(format!("AV1 temporary input file in {}: {e}", dir.display()))),
         }
     }
     Err(ExportError::Io("could not create unique AV1 spool file".into()))
@@ -496,6 +503,21 @@ pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, settings: &Expor
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn av1_temp_spool_uses_requested_scratch_directory_and_unique_files() {
+        let directory = std::env::temp_dir();
+        let (a, first_raw, first_ivf) = unique_temp_file_in(&directory).expect("first AV1 scratch");
+        let (b, second_raw, second_ivf) = unique_temp_file_in(&directory).expect("second AV1 scratch");
+        assert_ne!(first_raw, second_raw);
+        assert_ne!(first_ivf, second_ivf);
+        assert_eq!(first_raw.parent(), Some(directory.as_path()));
+        assert_eq!(second_raw.parent(), Some(directory.as_path()));
+        drop(a);
+        drop(b);
+        std::fs::remove_file(first_raw).unwrap();
+        std::fs::remove_file(second_raw).unwrap();
+    }
+
     #[test]
     fn professional_8k_packet_limit_covers_twelve_bit_444() {
         let max_pixels = 8192usize * 4320;
