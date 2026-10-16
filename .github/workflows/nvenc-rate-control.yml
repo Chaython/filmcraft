@@ -38,7 +38,7 @@ jobs:
       - name: Validate CQP settings and codec-specific QP ranges
         run: cargo test -p filmcraft-export --lib cqp
       - name: Validate NVENC AV1 QP and rate-control configuration
-        run: cargo test -p filmcraft-platform --lib av1_cqp
+        run: cargo test -p filmcraft-platform --lib cqp
       - name: Validate translated rate-control UI
         run: cargo test -p filmcraft-ui-egui --lib i18n
       - name: Strict lint
