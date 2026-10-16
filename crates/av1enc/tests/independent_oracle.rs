@@ -93,3 +93,40 @@ fn native_changing_frames_decode_independently() {
         }
     }
 }
+
+#[test]
+fn diagnose_first_gradient_frame_coding_modes() {
+    use filmcraft_av1enc::Preset;
+
+    let Some(ffmpeg) = filmcraft_testkit::ffmpeg_or_skip("native AV1 coding-mode oracle") else { return };
+    let (w, h) = (128usize, 128usize);
+    let y: Vec<u8> = (0..w * h).map(|i| (((i % w) * 2 + (i / w)) % 256) as u8).collect();
+    let uv = vec![128u8; w * h / 4];
+    let mut valid_modes = 0usize;
+    for preset in [Preset::Speed, Preset::Balanced, Preset::Quality] {
+        for cdef in [false, true] {
+            for qindex in [0u8, 12, 100, 220] {
+                let mut cfg = EncoderConfig::new(w as u32, h as u32, 24, 1);
+                cfg.preset = preset;
+                cfg.qindex = qindex;
+                cfg.enable_cdef = cdef;
+                let mut encoder = Encoder::new(cfg).unwrap();
+                let packet = encoder.encode(&YuvFrame { y: &y, u: &uv, v: &uv, y_stride: w, uv_stride: w / 2 }, 0).unwrap();
+                let path = filmcraft_testkit::temp_path(&filmcraft_testkit::fixtures_dir("av1enc-external-oracle").join("mode.ivf"));
+                std::fs::write(&path, ivf(w as u16, h as u16, 24, &[packet.data.clone()])).unwrap();
+                let output = Command::new(&ffmpeg)
+                    .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-f", "ivf", "-i"])
+                    .arg(&path)
+                    .args(["-pix_fmt", "yuv420p", "-f", "rawvideo", "-"])
+                    .stdin(Stdio::null())
+                    .output()
+                    .unwrap();
+                let _ = std::fs::remove_file(&path);
+                let valid = output.status.success() && output.stdout.len() == w * h * 3 / 2;
+                valid_modes += usize::from(valid);
+                println!("av1 mode={preset:?} cdef={cdef} qindex={qindex} bytes={} independent_decode={valid}", packet.data.len());
+            }
+        }
+    }
+    println!("AV1 coding-mode oracle: {valid_modes}/24 combinations decode independently");
+}
