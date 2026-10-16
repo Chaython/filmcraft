@@ -1625,9 +1625,9 @@ impl VideoEncoder for H264Encoder {
         if f.width != self.w || f.height != self.h {
             return Err(ExportError::Unsupported(format!("software AV1 frame {}x{} does not match encoder {}x{}", f.width, f.height, self.w, self.h)));
         }
-        if f.hdr.is_some() {
-            return Err(ExportError::Unsupported("software AV1 accepts only SDR frames; tone-map the source before encoding".into()));
-        }
+        // H.264's conversion path below supports HDR RGB input and attaches the selected
+        // ColorSignal metadata. Rejecting f.hdr here was an AV1-only restriction copied
+        // into the H.264 encoder and broke PQ/HLG exports.
         timed(Stage::Convert, || match f.hdr {
             Some(rgb) => {
                 let (kr, kb) = self.signal.kr_kb();
