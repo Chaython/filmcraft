@@ -810,8 +810,11 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             } else if s.bitrate_mode == BitrateMode::Cqp {
                 row(ui, t, tl!("Quantizer (QP)"), |ui| {
                     let default_qp = if av1 { 128.0 } else { 23.0 };
-                    let mut qp = s.qp.unwrap_or(default_qp as u32) as f64;
                     let maximum = if av1 { 255.0 } else { 51.0 };
+                    if s.qp.is_some_and(|qp| qp > maximum as u32) {
+                        s.qp = Some(maximum as u32);
+                    }
+                    let mut qp = s.qp.unwrap_or(default_qp as u32) as f64;
                     if drag(ui, reg, "export.video.qp", &mut qp, 0.0..=maximum, 1.0, "", 0) {
                         s.qp = Some(qp.round() as u32);
                     }
