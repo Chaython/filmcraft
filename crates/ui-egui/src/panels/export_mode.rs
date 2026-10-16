@@ -742,7 +742,7 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                 row(ui, t, tl!("Encoder"), |ui| {
                     if s.bitrate_mode == BitrateMode::Cqp {
                         ui.label("NVIDIA NVENC (CQP; hardware required)");
-                    } else if s.av1_pixel_format != Av1PixelFormat::Yuv420p8
+                    } else if !matches!(s.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10)
                         || s.av1_full_range
                         || s.hardware_encoding == HardwareEncoding::Off
                         || s.bitrate_mode == BitrateMode::Crf
