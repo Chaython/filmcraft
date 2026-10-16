@@ -944,18 +944,37 @@ fn av1_is_an_mp4_format_with_builtin_encoder() {
     assert!(e.to_string().contains("two-pass"), "{e}");
     assert!(Format::Av1.has_builtin_encoder());
     assert!(available(Format::Av1), "AV1 has a built-in software encoder");
+    // Default software AV1 is libaom for MP4 and MOV as well as MKV. Require
+    // independent libdav1d decoding so invalid native bitstreams cannot regress
+    // back into regular exports without failing Linux CI.
+    let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|v| !v.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+    let available_ffmpeg = std::process::Command::new(&ffmpeg).arg("-version").output().is_ok_and(|r| r.status.success());
+    if !available_ffmpeg {
+        assert!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() != Ok("1"), "Linux AV1 CI must supply libaom and libdav1d");
+        return;
+    }
     let (p, seq, m) = matte([0.0, 0.0, 1.0, 1.0], 160, 96, None);
     let sc = Scratch::new("av1-export");
-    let out_path = sc.path("x.mp4");
-    let mut exp_settings = ExportSettings { path: out_path.clone(), include_audio: false, ..a.clone() };
-    exp_settings.range = Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(3)));
-    let r = export(&p, seq, &exp_settings, &m, &Progress::default()).unwrap();
-    assert_eq!(r.frames, 3);
-    let mp4_data = std::fs::read(&out_path).unwrap();
-    assert!(!mp4_data.is_empty());
-    let mp4 = filmcraft_isobmff::open(&mp4_data).unwrap();
-    assert_eq!(mp4.tracks.len(), 1);
-    assert_eq!(mp4.tracks[0].samples.len(), 3);
+    for (multiplexer, filename) in [(Multiplexer::Mp4, "x.mp4"), (Multiplexer::Mov, "x.mov")] {
+        let out_path = sc.path(filename);
+        let mut exp_settings = ExportSettings { multiplexer, path: out_path.clone(), include_audio: false, ..a.clone() };
+        exp_settings.range = Some(TimeRange::new(Tick::ZERO, FrameRate::FPS_24.tick_of(3)));
+        let report = export(&p, seq, &exp_settings, &m, &Progress::default()).expect("conformant software AV1 export");
+        assert_eq!(report.frames, 3);
+        let mp4_data = std::fs::read(&out_path).unwrap();
+        assert!(!mp4_data.is_empty());
+        let mp4 = filmcraft_isobmff::open(&mp4_data).unwrap();
+        assert_eq!(mp4.tracks.len(), 1);
+        assert_eq!(mp4.tracks[0].samples.len(), 3);
+        let decoded = std::process::Command::new(&ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-i"])
+            .arg(&out_path)
+            .args(["-pix_fmt", "yuv420p", "-f", "rawvideo", "-"])
+            .output()
+            .expect("independent AV1 decoder");
+        assert!(decoded.status.success(), "{filename}: libdav1d rejected AV1 output: {}", String::from_utf8_lossy(&decoded.stderr));
+        assert_eq!(decoded.stdout.len(), (160 * 96 * 3 / 2) * 3, "{filename}: wrong number of decoded 4:2:0 frames");
+    }
 }
 
 #[test]
