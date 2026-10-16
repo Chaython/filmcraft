@@ -584,6 +584,34 @@ mod tests {
     }
 
     #[test]
+    fn libaom_cbr_and_peak_limited_vbr_produce_decodable_packets() {
+        let strict = std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() == Ok("1");
+        let ffmpeg = std::env::var_os("FILMCRAFT_FFMPEG").filter(|v| !v.is_empty()).unwrap_or_else(|| "ffmpeg".into());
+        if !Command::new(&ffmpeg).arg("-version").output().is_ok_and(|out| out.status.success()) {
+            assert!(!strict, "AV1 bitrate control acceptance needs FFmpeg/libaom");
+            return;
+        }
+        for mode in [BitrateMode::Cbr, BitrateMode::Vbr1Pass] {
+            let settings = ExportSettings {
+                format: Format::Av1,
+                bitrate_mode: mode,
+                bitrate_kbps: 600,
+                max_bitrate_kbps: Some(1_000),
+                ..Default::default()
+            };
+            let mut enc = FfmpegAv1Encoder::new(64, 64, FrameRate::FPS_24, &settings).expect("libaom bitrate encoder");
+            let rgba = vec![128u8; 64 * 64 * 4];
+            for index in 0..3 {
+                enc.encode(&EncoderFrame { width: 64, height: 64, rgba: &rgba, hdr: None, index }).expect("spool bitrate test");
+            }
+            let packets = enc.flush().expect("libaom bitrate control stream");
+            assert_eq!(packets.len(), 3, "{mode:?} must emit each requested frame");
+            assert!(packets[0].key);
+            assert!(enc.final_sample_entry().expect("validated AV1 sequence").is_some());
+        }
+    }
+
+    #[test]
     fn precision_and_range_codes_are_bounded() {
         for depth in [8, 10, 12] {
             assert_eq!(quantize(0.0, depth, false, false), 16u16 << (depth - 8));
