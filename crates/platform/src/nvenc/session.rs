@@ -381,6 +381,10 @@ impl Session {
                 rc.vbvBufferSize = rc.maxBitRate;
                 rc.vbvInitialDelay = rc.vbvBufferSize;
             }
+            // Start from the preset's neutral values so toggling an option off really disables it.
+            rc.flags &= !(RC_ENABLE_AQ | RC_ENABLE_LOOKAHEAD);
+            rc.lookaheadDepth = 0;
+            rc.multiPass = 0;
             if p.spatial_aq {
                 rc.flags |= RC_ENABLE_AQ;
             }
@@ -391,8 +395,7 @@ impl Session {
                 rc.lookaheadDepth = la.clamp(1, max_depth) as u16;
             }
             if !p.cqp && p.multipass {
-                // NV_ENC_MULTI_PASS_FULL_RESOLUTION.
-                rc.multiPass = 2;
+                rc.multiPass = NV_ENC_MULTI_PASS_FULL_RESOLUTION;
             }
             match p.codec {
                 Codec::H264 => {
