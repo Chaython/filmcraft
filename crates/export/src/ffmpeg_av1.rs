@@ -633,7 +633,12 @@ mod tests {
             let (sx, sy) = fmt.chroma_shift();
             let expected_samples = (w * h) as usize + 2 * (w as usize).div_ceil(1 << sx) * (h as usize).div_ceil(1 << sy);
             let bytes_per_sample = if fmt.bit_depth() > 8 { 2 } else { 1 };
-            assert_eq!(decoded.stdout.len(), 2 * expected_samples * bytes_per_sample, "{}: odd-sized chroma plane is cropped or padded incorrectly", fmt.label());
+            assert_eq!(
+                decoded.stdout.len(),
+                2 * expected_samples * bytes_per_sample,
+                "{}: odd-sized chroma plane is cropped or padded incorrectly",
+                fmt.label()
+            );
         }
     }
 
