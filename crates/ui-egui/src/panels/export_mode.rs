@@ -902,12 +902,9 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     );
                 });
                 row(ui, t, tl!("Spatial AQ"), |ui| {
-                    ui.add_enabled_ui(
-                        s.bitrate_mode != BitrateMode::Crf && s.bitrate_mode != BitrateMode::Vbr2Pass,
-                        |ui| {
-                            check(ui, reg, "export.video.spatialAq", &mut s.spatial_aq, "");
-                        },
-                    );
+                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Crf && s.bitrate_mode != BitrateMode::Vbr2Pass, |ui| {
+                        check(ui, reg, "export.video.spatialAq", &mut s.spatial_aq, "");
+                    });
                 });
                 row(ui, t, tl!("Lookahead"), |ui| {
                     ui.add_enabled_ui(
