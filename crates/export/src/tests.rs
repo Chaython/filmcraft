@@ -542,3 +542,44 @@ impl FrameRenderer for FakeRenderer {
         Some(filmcraft_render::Image::new(320, 180))
     }
 }
+
+#[test]
+fn av1_cqp_uses_the_full_av1_qp_range_and_rejects_software_fallbacks() {
+    let mut s = ExportSettings {
+        format: Format::Av1,
+        hardware_encoding: HardwareEncoding::Auto,
+        bitrate_mode: BitrateMode::Cqp,
+        qp: Some(255),
+        ..Default::default()
+    };
+    assert!(s.validate().is_ok(), "AV1 NVENC CQP must accept QP 255");
+
+    s.qp = Some(256);
+    assert!(s.validate().is_err(), "AV1 CQP above 255 must be rejected");
+
+    s.qp = Some(128);
+    s.av1_full_range = true;
+    assert!(s.validate().is_err(), "unsupported full-range AV1 must not fall back silently");
+
+    s.av1_full_range = false;
+    s.av1_pixel_format = Av1PixelFormat::Yuv422p10;
+    assert!(s.validate().is_err(), "AV1 NVENC CQP is limited to 4:2:0 8/10-bit");
+
+    s.av1_pixel_format = Av1PixelFormat::Yuv420p8;
+    s.hardware_encoding = HardwareEncoding::Off;
+    assert!(s.validate().is_err(), "CQP must not silently select software AV1");
+}
+
+#[test]
+fn h264_cqp_uses_the_h264_qp_range() {
+    let mut s = ExportSettings {
+        format: Format::H264,
+        hardware_encoding: HardwareEncoding::Auto,
+        bitrate_mode: BitrateMode::Cqp,
+        qp: Some(51),
+        ..Default::default()
+    };
+    assert!(s.validate().is_ok(), "H.264 NVENC CQP must accept QP 51");
+    s.qp = Some(52);
+    assert!(s.validate().is_err(), "H.264 CQP above 51 must be rejected");
+}
