@@ -405,24 +405,31 @@ mod tests {
 
     #[test]
     fn missing_driver_is_an_error_when_nvenc_rate_control_is_required() {
-        let s = ExportSettings {
-            hardware_encoding: HardwareEncoding::Auto,
-            bitrate_mode: BitrateMode::Cqp,
-            qp: Some(23),
-            ..Default::default()
-        };
-        let result = factory_with(
-            Format::H264,
-            640,
-            360,
-            FrameRate::FPS_24,
-            &s,
-            |_| Err("no NVIDIA encoder driver".into()),
-        );
-        let Some(Err(ExportError::Unsupported(message))) = result else {
-            panic!("CQP must not fall back to software H.264");
-        };
-        assert!(message.contains("NVENC"), "{message}");
+        let cases = [
+            ExportSettings {
+                hardware_encoding: HardwareEncoding::Auto,
+                bitrate_mode: BitrateMode::Cqp,
+                qp: Some(23),
+                ..Default::default()
+            },
+            ExportSettings { hardware_encoding: HardwareEncoding::Auto, multipass: true, ..Default::default() },
+            ExportSettings { hardware_encoding: HardwareEncoding::Auto, spatial_aq: true, ..Default::default() },
+            ExportSettings { hardware_encoding: HardwareEncoding::Auto, lookahead: Some(16), ..Default::default() },
+        ];
+        for s in &cases {
+            let result = factory_with(
+                Format::H264,
+                640,
+                360,
+                FrameRate::FPS_24,
+                s,
+                |_| Err("no NVIDIA encoder driver".into()),
+            );
+            let Some(Err(ExportError::Unsupported(message))) = result else {
+                panic!("NVENC-only rate controls must not fall back to software H.264");
+            };
+            assert!(message.contains("NVENC"), "{message}");
+        }
     }
 
     #[test]
