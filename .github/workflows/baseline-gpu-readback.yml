@@ -1,0 +1,40 @@
+name: Baseline GPU readback investigation
+
+on:
+  push:
+    branches: [baseline-gpu-readback-test]
+
+permissions:
+  contents: read
+
+jobs:
+  gpu-sdr:
+    name: Baseline GPU compositor (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux desktop build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libgtk-3-dev libdbus-1-dev pkg-config
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Check GPU, export, desktop and CLI
+        run: cargo check -p filmcraft-gpu -p filmcraft-export -p filmcraft-cli -p filmcraft --all-targets
+      - name: GPU compositor unit tests
+        run: cargo test -p filmcraft-gpu --lib
+      - name: GPU / CPU export parity tests
+        run: cargo test -p filmcraft-gpu --test export_pipeline
+      - name: Export pipeline unit tests
+        run: cargo test -p filmcraft-export --lib
