@@ -28,8 +28,25 @@ mod windows_gpu {
             Some(Err(e)) => panic!("{name} AV1 encoder creation failed: {e}"),
             None => panic!("{name} AV1 hardware session unavailable or unsupported"),
         };
-        let rgba = vec![128u8; (w * h * 4) as usize];
-        let hdr = vec![0.5f32; (w * h * 3) as usize];
+        // A flat gray frame can decode successfully even when RGB-to-YUV
+        // conversion is broken. Exercise spatially varying R/G, chroma and
+        // opaque alpha in both the RGBA8 and float-RGB hardware inputs.
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        let mut hdr = vec![0.0f32; (w * h * 3) as usize];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let red = x as f32 / (w - 1) as f32;
+                let green = y as f32 / (h - 1) as f32;
+                let i = y * w as usize + x;
+                rgba[i * 4] = (red * 255.0).round() as u8;
+                rgba[i * 4 + 1] = (green * 255.0).round() as u8;
+                rgba[i * 4 + 2] = 128;
+                rgba[i * 4 + 3] = 255;
+                hdr[i * 3] = red;
+                hdr[i * 3 + 1] = green;
+                hdr[i * 3 + 2] = 0.5;
+            }
+        }
         let mut packets = Vec::new();
         for i in 0..16u64 {
             let frame = EncoderFrame { width: w, height: h, rgba: if hdr_input { &[] } else { &rgba }, hdr: hdr_input.then_some(hdr.as_slice()), index: i };
@@ -135,6 +152,22 @@ mod windows_gpu {
             decoded.stdout.len(),
             (w * h * 3 / 2 * 16 * if ten_bit { 2 } else { 1 }) as usize,
             "{name} returned truncated or incorrectly framed AV1 video"
+        );
+        let row = (h / 2 * w) as usize;
+        let left = row + 16;
+        let right = row + (w - 17) as usize;
+        let y_code = |index: usize| -> u16 {
+            if ten_bit {
+                let at = index * 2;
+                u16::from_le_bytes([decoded.stdout[at], decoded.stdout[at + 1]])
+            } else {
+                u16::from(decoded.stdout[index])
+            }
+        };
+        let (left_y, right_y) = (y_code(left), y_code(right));
+        assert!(
+            right_y > left_y + if ten_bit { 40 } else { 10 },
+            "{name} encoded AV1 lost horizontal color-gradient luminance: left={left_y}, right={right_y}"
         );
     }
 
