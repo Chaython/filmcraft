@@ -30,7 +30,14 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Native AV1 compile
         run: cargo check -p filmcraft-av1enc --all-targets
-      - name: Native AV1 tests
-        run: cargo test -p filmcraft-av1enc
+      - name: Install independent AV1 decoder oracle
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          ffmpeg -hide_banner -decoders | grep -F libdav1d
+      - name: Native AV1 tests with mandatory independent decoder
+        env:
+          FILMCRAFT_REQUIRE_AV1_ORACLE: "1"
+        run: cargo test -p filmcraft-av1enc -- --nocapture
       - name: Strict lint
         run: cargo clippy -p filmcraft-av1enc --all-targets -- -D warnings
