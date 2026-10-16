@@ -570,6 +570,34 @@ fn av1_cqp_uses_the_full_av1_qp_range_and_rejects_software_fallbacks() {
 }
 
 #[test]
+fn cqp_rejects_multipass_and_lookahead() {
+    let cases = [
+        ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            bitrate_mode: BitrateMode::Cqp,
+            multipass: true,
+            ..Default::default()
+        },
+        ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            bitrate_mode: BitrateMode::Cqp,
+            lookahead: Some(16),
+            ..Default::default()
+        },
+    ];
+    for settings in cases {
+        match settings.validate() {
+            Err(ExportError::Unsupported(message)) => {
+                assert!(message.contains("CQP cannot be combined with multipass or lookahead"), "{message}");
+            }
+            other => panic!("incompatible CQP settings were accepted: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn av1_nvenc_controls_reject_full_range_and_non_420_formats() {
     let cases = [
         ExportSettings {

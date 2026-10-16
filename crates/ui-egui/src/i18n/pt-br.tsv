@@ -3578,7 +3578,7 @@
 
 # The native macOS application menu (Settings…).
 	Settings	Preferências
-	CQP (constant quantizer)	CQP (quantizador constante
+	CQP (constant quantizer)	CQP (quantizador constante)
 	Hardware or built-in	Hardware ou integrado
 	Lookahead	Pré-análise
 	Multipass	Múltiplas passagens
