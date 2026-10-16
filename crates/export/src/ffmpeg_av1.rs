@@ -592,13 +592,7 @@ mod tests {
             return;
         }
         for mode in [BitrateMode::Cbr, BitrateMode::Vbr1Pass] {
-            let settings = ExportSettings {
-                format: Format::Av1,
-                bitrate_mode: mode,
-                bitrate_kbps: 600,
-                max_bitrate_kbps: Some(1_000),
-                ..Default::default()
-            };
+            let settings = ExportSettings { format: Format::Av1, bitrate_mode: mode, bitrate_kbps: 600, max_bitrate_kbps: Some(1_000), ..Default::default() };
             let mut enc = FfmpegAv1Encoder::new(64, 64, FrameRate::FPS_24, &settings).expect("libaom bitrate encoder");
             let rgba = vec![128u8; 64 * 64 * 4];
             for index in 0..3 {
