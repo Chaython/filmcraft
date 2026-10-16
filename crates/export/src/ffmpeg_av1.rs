@@ -14,7 +14,9 @@ use filmcraft_isobmff::{Av1Config, ColorInfo, SampleEntry};
 use filmcraft_time::FrameRate;
 
 static FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-const MAX_FRAME_BYTES: usize = 128 * 1024 * 1024;
+// An 8K 12-bit 4:4:4 raw frame is ~212 MiB. Keep a bounded per-packet
+// allocation that still permits high-entropy Professional-profile frames.
+const MAX_FRAME_BYTES: usize = 384 * 1024 * 1024;
 
 fn unique_temp_file() -> Result<(File, PathBuf, PathBuf)> {
     for _ in 0..32 {
@@ -494,6 +496,14 @@ pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, settings: &Expor
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn professional_8k_packet_limit_covers_twelve_bit_444() {
+        let max_pixels = 8192usize * 4320;
+        let bytes_per_12bit_444_frame = max_pixels * 3 * 2;
+        assert!(MAX_FRAME_BYTES > bytes_per_12bit_444_frame, "8K 12-bit 4:4:4 must not be rejected for exceeding the old 128 MiB packet cap");
+        assert!(MAX_FRAME_BYTES <= 512 * 1024 * 1024, "untrusted IVF packets still need a bounded allocation");
+    }
+
     #[test]
     fn libaom_flush_into_streams_packets_and_preserves_av1_configuration() {
         let strict = std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref() == Ok("1");
