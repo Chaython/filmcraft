@@ -1383,14 +1383,7 @@ mod tests {
 
     #[test]
     fn nvenc_rate_control_labels_are_translated() {
-        let common = [
-            "CQP (constant quantizer)",
-            "Hardware or built-in",
-            "Lookahead",
-            "Multipass",
-            "Quantizer (QP)",
-            "Spatial AQ",
-        ];
+        let common = ["CQP (constant quantizer)", "Hardware or built-in", "Lookahead", "Multipass", "Quantizer (QP)", "Spatial AQ"];
         for language in [Language::Es, Language::Fr, Language::Ja, Language::ZhCn, Language::PtBr] {
             for source in common {
                 assert!(language.has(source), "{language:?} is missing {source:?}");
