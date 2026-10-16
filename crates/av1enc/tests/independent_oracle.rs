@@ -130,3 +130,42 @@ fn diagnose_first_gradient_frame_coding_modes() {
     }
     println!("AV1 coding-mode oracle: {valid_modes}/24 combinations decode independently");
 }
+
+#[test]
+fn diagnose_first_gradient_chroma_values() {
+    let Some(ffmpeg) = filmcraft_testkit::ffmpeg_or_skip("native AV1 chroma oracle") else { return };
+    let (w, h) = (128usize, 128usize);
+    let y: Vec<u8> = (0..w * h).map(|i| (((i % w) * 2 + (i / w)) % 256) as u8).collect();
+    for (u_val, v_val) in [
+        (128u8, 128u8),
+        (127, 128),
+        (126, 128),
+        (112, 128),
+        (96, 128),
+        (128, 129),
+        (128, 130),
+        (128, 160),
+        (96, 160),
+        (96, 96),
+        (160, 160),
+        (0, 0),
+        (255, 255),
+    ] {
+        let u = vec![u_val; w * h / 4];
+        let v = vec![v_val; w * h / 4];
+        let mut encoder = Encoder::new(EncoderConfig::new(w as u32, h as u32, 24, 10)).unwrap();
+        let packet = encoder.encode(&YuvFrame { y: &y, u: &u, v: &v, y_stride: w, uv_stride: w / 2 }, 0).unwrap();
+        let path = filmcraft_testkit::temp_path(&filmcraft_testkit::fixtures_dir("av1enc-external-oracle").join("chroma.ivf"));
+        std::fs::write(&path, ivf(w as u16, h as u16, 24, &[packet.data.clone()])).unwrap();
+        let output = Command::new(&ffmpeg)
+            .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-f", "ivf", "-i"])
+            .arg(&path)
+            .args(["-pix_fmt", "yuv420p", "-f", "rawvideo", "-"])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_file(&path);
+        let valid = output.status.success() && output.stdout.len() == w * h * 3 / 2;
+        println!("chroma U={u_val} V={v_val} bytes={} independent_decode={valid}", packet.data.len());
+    }
+}
