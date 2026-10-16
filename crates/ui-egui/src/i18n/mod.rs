@@ -837,7 +837,9 @@ mod tests {
         ex::MxfVideoCodec::ALL.iter().for_each(|c| push(&mut out, c.label()));
         ex::Placement::ALL.iter().for_each(|p| push(&mut out, p.label()));
         [ex::FieldOrder::Progressive, ex::FieldOrder::UpperFirst, ex::FieldOrder::LowerFirst].iter().for_each(|f| push(&mut out, f.label()));
-        [ex::BitrateMode::Cbr, ex::BitrateMode::Vbr1Pass, ex::BitrateMode::Vbr2Pass, ex::BitrateMode::Crf].iter().for_each(|m| push(&mut out, m.label()));
+        [ex::BitrateMode::Cbr, ex::BitrateMode::Vbr1Pass, ex::BitrateMode::Vbr2Pass, ex::BitrateMode::Crf, ex::BitrateMode::Cqp]
+            .iter()
+            .for_each(|m| push(&mut out, m.label()));
         [ex::H264Profile::Baseline, ex::H264Profile::Main, ex::H264Profile::High].iter().for_each(|p| push(&mut out, p.label()));
         crate::panels::export_mode::RANGES.iter().for_each(|(_, l)| push(&mut out, l));
         crate::panels::export_mode::PARS.iter().for_each(|(l, _)| push(&mut out, l));
@@ -1377,5 +1379,29 @@ mod tests {
                 }
             }
         });
+    }
+
+    #[test]
+    fn nvenc_rate_control_labels_are_translated() {
+        let common = ["CQP (constant quantizer)", "Hardware or built-in", "Lookahead", "Multipass", "Quantizer (QP)", "Spatial AQ"];
+        for language in [Language::Es, Language::Fr, Language::Ja, Language::ZhCn, Language::PtBr] {
+            for source in common {
+                assert!(language.has(source), "{language:?} is missing {source:?}");
+                assert_ne!(language.tr(source), source, "{language:?} left {source:?} untranslated");
+            }
+        }
+        let av1 = [
+            "Full Range",
+            "Pixel Format",
+            "AV1 1080p Full HD",
+            "AV1 1920×1080, VBR 1 pass, 14 Mbps target, AAC 320 kbps",
+            "AV1 2160p 4K Ultra HD",
+            "AV1 3840×2160, VBR 1 pass, 35 Mbps target, AAC 320 kbps",
+        ];
+        for language in [Language::Es, Language::Fr, Language::Ja, Language::ZhCn, Language::PtBr] {
+            for source in av1 {
+                assert!(language.has(source), "{language:?} is missing {source:?}");
+            }
+        }
     }
 }

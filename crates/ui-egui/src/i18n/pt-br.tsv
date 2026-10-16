@@ -3578,3 +3578,15 @@
 
 # The native macOS application menu (Settings…).
 	Settings	Preferências
+	CQP (constant quantizer)	CQP (quantizador constante)
+	Hardware or built-in	Hardware ou integrado
+	Lookahead	Pré-análise
+	Multipass	Múltiplas passagens
+	Quantizer (QP)	Quantizador (QP)
+	Spatial AQ	AQ espacial
+	Full Range	Faixa completa
+	Pixel Format	Formato de pixel
+	AV1 1080p Full HD	AV1 1080p Full HD
+	AV1 1920×1080, VBR 1 pass, 14 Mbps target, AAC 320 kbps	AV1 1920×1080, VBR de 1 passagem, alvo de 14 Mbps, AAC 320 kbps
+	AV1 2160p 4K Ultra HD	AV1 2160p 4K Ultra HD
+	AV1 3840×2160, VBR 1 pass, 35 Mbps target, AAC 320 kbps	AV1 3840×2160, VBR de 1 passagem, alvo de 35 Mbps, AAC 320 kbps
