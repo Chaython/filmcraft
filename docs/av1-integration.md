@@ -20,7 +20,7 @@ AV1 format recognition/MP4 export infrastructure (upstream #738 and #739) and pa
 
 The export panel now offers nine pixel formats: **8/10/12-bit × 4:2:0/4:2:2/4:4:4**, plus limited/full-range signaling. The native Rust encoder remains 8-bit 4:2:0 BT.709 SDR. The advanced profiles use a **local FFmpeg executable with libaom-av1**, not a built-in 12-bit AV1 implementation.
 
-- Default 8-bit 4:2:0 with Hardware Auto: NVENC on supported Windows NVIDIA GPUs, otherwise the experimental Rust encoder. HDR-capable NVENC can select Main10 from an HDR working sequence.
+- Default 8-bit 4:2:0 with Hardware Auto: NVENC on supported Windows NVIDIA GPUs, otherwise FFmpeg/libaom. The experimental Rust encoder is disabled by default for **all** containers because a real exported stream failed independent libdav1d decoding; `FILMCRAFT_EXPERIMENTAL_NATIVE_AV1=1` opts in for diagnostics on 8-bit BT.709 SDR MP4/MOV only. HDR-capable NVENC can select Main10 from an HDR working sequence.
 - Other pixel formats or Full Range: FFmpeg/libaom software backend; 10/12-bit formats may use HDR PQ/HLG source floats when the timeline works in Rec.2100 and SDR conversion was not requested. Source clips/timeline in 8-bit Rec.709 cannot be upgraded to genuine 12-bit precision by selecting a 12-bit output.
 - FFmpeg installation: set `FILMCRAFT_FFMPEG` to the full executable path, or place `ffmpeg` on PATH. This integration does not download FFmpeg or bundle codecs. Unsupported libaom build profiles fail with the encoder's real diagnostics.
 - The advanced backend writes planar little-endian YUV, invokes `libaom-av1` without shell execution, then validates the AV1 sequence header's bit depth, subsampling, primaries, transfer, matrix, and range against the requested settings before finalizing MP4/MOV `av1C`. Temporary raw/IVF files are cleaned up. **Current limit:** its one-shot IVF flush is bounded to 1 GiB of encoded output; large/long exports need a streaming mux/encoder refactor.
@@ -28,7 +28,7 @@ The export panel now offers nine pixel formats: **8/10/12-bit × 4:2:0/4:2:2/4:4
 
 | Feature | Current path | Verification |
 | --- | --- | --- |
-| 8-bit 4:2:0 SDR | Native Rust or NVENC; optional libaom when Full Range | Native round-trip; NVENC needs real GPU |
+| 8-bit 4:2:0 SDR | NVENC when supported; otherwise FFmpeg/libaom; experimental Rust opt-in only | libaom independent decode; NVENC needs real GPU |
 | 10-bit 4:2:0 PQ/HLG | NVENC Main10 when supported; FFmpeg/libaom | New high-depth backend requires real FFmpeg CI and color-metadata validation |
 | 12-bit 4:2:0 | FFmpeg/libaom | Automated high-depth encode test added |
 | 8/10/12-bit 4:2:2 and 4:4:4 | FFmpeg/libaom | Profile-specific output header validation; CI test added |

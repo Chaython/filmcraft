@@ -1185,7 +1185,8 @@ fn av1_nvenc_sdr_main10_rgba_conversion_preserves_yuv_precision() {
 #[test]
 fn av1_software_encoder_rejects_mismatched_size_and_hdr_input() {
     let s = ExportSettings { format: Format::Av1, bitrate_mode: BitrateMode::Crf, ..Default::default() };
-    let mut encoder = av1_factory(Format::Av1, 128, 96, FrameRate::FPS_24, &s).unwrap().unwrap();
+    // Test the experimental native backend explicitly, not the production libaom fallback.
+    let mut encoder = native_av1_factory(Format::Av1, 128, 96, FrameRate::FPS_24, &s).unwrap().unwrap();
     let av1c = match encoder.sample_entry().codec {
         filmcraft_isobmff::CodecConfig::Av1(c) => c,
         other => panic!("expected AV1 sample entry, got {other:?}"),

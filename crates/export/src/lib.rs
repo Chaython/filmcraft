@@ -134,9 +134,9 @@ pub enum Format {
     /// ([`hdr_available`]); elsewhere they are tone-mapped to SDR.
     #[serde(rename = "hevc", alias = "Hevc")]
     Hevc,
-    /// MPEG-4 or QuickTime AV1 video + AAC audio: built-in experimental 8-bit 4:2:0 SDR
-    /// software encoder, with optional hardware Main/Main10 support (for example NVIDIA NVENC
-    /// on Windows, including 10-bit PQ/HLG when the GPU accepts it).
+    /// AV1 video in MP4, MOV or MKV: optional hardware Main/Main10 or software
+    /// libaom-av1 (via local FFmpeg). The experimental built-in Rust AV1 encoder is
+    /// available only with FILMCRAFT_EXPERIMENTAL_NATIVE_AV1=1 for diagnostics.
     #[serde(rename = "av1", alias = "Av1", alias = "AV1")]
     Av1,
     /// QuickTime, Apple ProRes 422 (HQ unless the settings pick another flavour) + PCM.
@@ -1931,14 +1931,23 @@ fn av1_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettin
     if format != Format::Av1 {
         return None;
     }
-    // Matroska requires independently decodable temporal units. The early-stage
-    // native 8-bit AV1 writer can emit packets that libdav1d rejects, so route
-    // MKV's software fallback through the tested libaom bitstream encoder.
-    // NVENC/AMF/QSV factories are tried first when hardware is selected.
-    if s.multiplexer == settings::Multiplexer::Mkv || s.av1_pixel_format != Av1PixelFormat::Yuv420p8 || s.av1_full_range {
+    // Independent libdav1d validation rejected native AV1 output on a real export.
+    // Do not send potentially invalid MP4/MOV streams to users just because they
+    // were previously only rejected for Matroska. libaom is the default for ALL
+    // software AV1 exports; keep native only as an explicitly requested diagnostic
+    // backend for its supported, 8-bit SDR MP4/MOV subset.
+    let native_opt_in = std::env::var("FILMCRAFT_EXPERIMENTAL_NATIVE_AV1").as_deref() == Ok("1");
+    if !native_opt_in || s.multiplexer == settings::Multiplexer::Mkv || s.av1_pixel_format != Av1PixelFormat::Yuv420p8 || s.av1_full_range {
         return ffmpeg_av1::factory(format, w, h, rate, s);
     }
-    // The current software encoder accepts only BT.709 SDR 8-bit 4:2:0.
+    native_av1_factory(format, w, h, rate, s)
+}
+
+fn native_av1_factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Result<Box<dyn VideoEncoder>>> {
+    if format != Format::Av1 {
+        return None;
+    }
+    // The experimental native encoder accepts only BT.709 SDR 8-bit 4:2:0.
     // Never silently export 8-bit pixels carrying PQ/HLG tags as HDR.
     if s.signal.is_hdr() || s.signal != ColorSignal::default() {
         return Some(Err(ExportError::Unsupported(

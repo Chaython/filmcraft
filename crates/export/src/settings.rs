@@ -705,14 +705,10 @@ impl ExportSettings {
                     v += &format!(", keyframe every {} frames", r.keyint);
                 }
                 Format::Av1 => {
-                    let software = crate::job::av1_software_sdr(self);
-                    let external = self.av1_pixel_format != crate::Av1PixelFormat::Yuv420p8 || self.av1_full_range;
-                    let encoder = if external {
+                    let encoder = if self.hardware_encoding == HardwareEncoding::Off || self.bitrate_mode == BitrateMode::Crf {
                         "libaom-av1 software (FFmpeg)"
-                    } else if software {
-                        "native software"
                     } else {
-                        "hardware Auto (native software fallback)"
+                        "hardware Auto (libaom-av1 fallback)"
                     };
                     v += &format!(
                         ", AV1 {}, {}, {} range, {}",
