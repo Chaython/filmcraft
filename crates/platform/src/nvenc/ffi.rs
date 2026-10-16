@@ -221,6 +221,7 @@ pub struct NV_ENC_RC_PARAMS {
 
 pub const RC_ENABLE_AQ: u32 = 1 << 3;
 pub const RC_ENABLE_LOOKAHEAD: u32 = 1 << 5;
+pub const NV_ENC_MULTI_PASS_FULL_RESOLUTION: u32 = 2;
 pub const RC_ZERO_REORDER_DELAY: u32 = 1 << 9;
 
 #[repr(C)]
