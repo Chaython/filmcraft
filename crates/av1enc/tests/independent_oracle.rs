@@ -93,4 +93,3 @@ fn native_changing_frames_decode_independently() {
         }
     }
 }
-
