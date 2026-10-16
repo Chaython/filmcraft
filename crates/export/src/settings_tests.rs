@@ -912,6 +912,20 @@ fn a_time_left_reads_like_a_clock() {
 }
 
 #[test]
+fn av1_crf_allows_full_libaom_quality_range() {
+    for crf in [0.0, 23.0, 51.0, 63.0] {
+        let s = ExportSettings { format: Format::Av1, bitrate_mode: BitrateMode::Crf, crf, ..Default::default() };
+        assert!(s.validate().is_ok(), "AV1/libaom supports CRF {crf}");
+    }
+    for crf in [-0.1, 63.1, f32::NAN, f32::INFINITY] {
+        let s = ExportSettings { format: Format::Av1, bitrate_mode: BitrateMode::Crf, crf, ..Default::default() };
+        assert!(s.validate().is_err(), "invalid AV1 CRF {crf} must be rejected");
+    }
+    let h264 = ExportSettings { format: Format::H264, bitrate_mode: BitrateMode::Crf, crf: 63.0, ..Default::default() };
+    assert!(h264.validate().is_err(), "H.264 must retain its narrower quality range");
+}
+
+#[test]
 fn av1_is_an_mp4_format_with_builtin_encoder() {
     for name in ["av1", "AV1", "av01"] {
         assert_eq!(Format::from_name(name), Some(Format::Av1), "{name}");

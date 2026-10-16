@@ -780,7 +780,8 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             if s.bitrate_mode == BitrateMode::Crf {
                 row(ui, t, tl!("Quality (CRF)"), |ui| {
                     let mut crf = if s.crf.is_finite() { f64::from(s.crf) } else { f64::from(filmcraft_engine::export::DEFAULT_CRF) };
-                    if drag(ui, reg, "export.video.crf", &mut crf, 0.0..=51.0, 0.1, "", 0) {
+                    let maximum = if av1 { 63.0 } else { 51.0 };
+                    if drag(ui, reg, "export.video.crf", &mut crf, 0.0..=maximum, 0.1, "", 0) {
                         s.crf = crf.round() as f32;
                     }
                 });
