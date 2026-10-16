@@ -607,13 +607,7 @@ fn av1_nvenc_controls_reject_full_range_and_non_420_formats() {
             av1_pixel_format: Av1PixelFormat::Yuv422p10,
             ..Default::default()
         },
-        ExportSettings {
-            format: Format::Av1,
-            hardware_encoding: HardwareEncoding::Auto,
-            lookahead: Some(16),
-            av1_full_range: true,
-            ..Default::default()
-        },
+        ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, lookahead: Some(16), av1_full_range: true, ..Default::default() },
     ];
     for settings in cases {
         match settings.validate() {
