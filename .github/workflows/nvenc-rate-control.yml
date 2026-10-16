@@ -44,6 +44,6 @@ jobs:
       - name: Validate NVENC AV1 QP and rate-control configuration
         run: cargo test -p filmcraft-platform --lib cqp
       - name: Validate translated rate-control UI
-        run: cargo test -p filmcraft-ui-egui --lib i18n
+        run: cargo test -p filmcraft-ui-egui --lib catalogs_are_well_formed && cargo test -p filmcraft-ui-egui --lib nvenc_rate_control_labels_are_translated
       - name: Strict lint
         run: cargo clippy --no-deps -p filmcraft-platform -p filmcraft-export -p filmcraft-ui-egui -p filmcraft --all-targets -- -D warnings -A clippy::nonminimal_bool -A clippy::collapsible_match
