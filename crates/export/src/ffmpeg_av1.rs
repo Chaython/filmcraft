@@ -530,7 +530,7 @@ mod tests {
         assert!(max_packet > 0);
         assert!(encoder.flush().expect("idempotent flush").is_empty());
         let entry = encoder.final_sample_entry().expect("validated sequence header").expect("AV1 sample entry");
-        let CodecConfig::Av1(av1) = entry.codec else { panic!("libaom must emit an AV1 sample entry") };
+        let filmcraft_isobmff::CodecConfig::Av1(av1) = entry.codec else { panic!("libaom must emit an AV1 sample entry") };
         assert!(av1.high_bitdepth);
         assert!(!av1.config_obus.is_empty());
     }
