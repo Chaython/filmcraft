@@ -728,7 +728,8 @@ impl ExportSettings {
         if self.effects.image_overlay.enabled && self.effects.image_overlay.path.trim().is_empty() {
             return Err(ExportError::Unsupported("image overlay: no image file chosen".into()));
         }
-        let nvenc_controls = self.bitrate_mode == BitrateMode::Cqp || self.multipass || self.spatial_aq || self.lookahead.is_some();
+        let nvenc_controls = matches!(self.format, Format::H264 | Format::Hevc | Format::Av1)
+            && (self.bitrate_mode == BitrateMode::Cqp || self.multipass || self.spatial_aq || self.lookahead.is_some());
         if self.bitrate_mode == BitrateMode::Cqp {
             if !matches!(self.format, Format::H264 | Format::Hevc | Format::Av1) {
                 return Err(ExportError::Unsupported("CQP is available only for H.264, H.265 or AV1 NVENC exports".into()));
