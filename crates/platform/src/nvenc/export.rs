@@ -200,6 +200,7 @@ fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -
     };
     let fps = (num, den);
     let kbps = s.bitrate_kbps.max(100);
+    let cqp = s.bitrate_mode == BitrateMode::Cqp;
     Ok(Config {
         width: w,
         height: h,
@@ -207,6 +208,11 @@ fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -
         bitrate_kbps: kbps,
         max_bitrate_kbps: s.max_bitrate_kbps.filter(|m| *m >= kbps).unwrap_or_else(|| kbps.saturating_add(kbps / 2)),
         cbr: s.bitrate_mode == BitrateMode::Cbr,
+        cqp,
+        qp: s.qp.unwrap_or(if av1 { 128 } else { 23 }).min(if av1 { 255 } else { 51 }),
+        multipass: s.multipass && !cqp,
+        spatial_aq: s.spatial_aq,
+        lookahead: if cqp { None } else { s.lookahead },
         keyint: s.keyframe_distance.filter(|k| *k > 0).unwrap_or_else(|| (f64::from(fps.0) / f64::from(fps.1) * 2.0).round().max(1.0) as u32),
         profile: match (av1, hevc, s.h264_profile) {
             (true, _, _) if hdr || s.av1_pixel_format == filmcraft_export::Av1PixelFormat::Yuv420p10 => Profile::Av1Main10,
