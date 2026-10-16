@@ -712,9 +712,13 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                 s.av1_pixel_format = s.av1_pixel_format.at_least_10_bit();
             }
             let av1_nvenc_eligible = !s.av1_full_range && matches!(s.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10);
-            // This fork's AV1 NVENC path is currently Windows-only. CQP and the advanced controls
-            // must not be offered when the export would silently fall back to software.
-            let nvenc_rate_control = cfg!(all(target_os = "windows", target_arch = "x86_64"))
+            // AV1/HEVC NVENC are Windows-only here; H.264 NVENC also supports Linux x64.
+            let nvenc_rate_control_platform = if av1 || hevc {
+                cfg!(all(target_os = "windows", target_arch = "x86_64"))
+            } else {
+                cfg!(all(target_arch = "x86_64", any(target_os = "windows", target_os = "linux")))
+            };
+            let nvenc_rate_control = nvenc_rate_control_platform
                 && (hevc || s.hardware_encoding == HardwareEncoding::Auto)
                 && (!av1 || av1_nvenc_eligible);
             if hevc {

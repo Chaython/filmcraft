@@ -766,8 +766,13 @@ impl ExportSettings {
         {
             return Err(ExportError::Unsupported("AV1 NVENC rate controls require limited-range 4:2:0 8-bit or 10-bit output".into()));
         }
-        if nvenc_controls && !cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-            return Err(ExportError::Unsupported("CQP, multipass, spatial AQ and lookahead currently require Windows x64 NVENC".into()));
+        let nvenc_rate_control_supported = match self.format {
+            Format::H264 => cfg!(all(target_arch = "x86_64", any(target_os = "windows", target_os = "linux"))),
+            Format::Hevc | Format::Av1 => cfg!(all(target_os = "windows", target_arch = "x86_64")),
+            _ => false,
+        };
+        if nvenc_controls && !nvenc_rate_control_supported {
+            return Err(ExportError::Unsupported("NVENC CQP, multipass, spatial AQ and lookahead are unavailable on this platform".into()));
         }
         if (self.multipass || self.spatial_aq || self.lookahead.is_some()) && self.hardware_encoding == HardwareEncoding::Off && self.format != Format::Hevc {
             return Err(ExportError::Unsupported("multipass, spatial AQ and lookahead require hardware encoding".into()));

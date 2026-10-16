@@ -652,8 +652,8 @@ fn h264_cqp_uses_the_h264_qp_range() {
         ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(51), ..Default::default() };
     assert_eq!(
         s.validate().is_ok(),
-        cfg!(all(target_os = "windows", target_arch = "x86_64")),
-        "valid H.264 CQP is accepted only on the supported Windows x64 NVENC path"
+        cfg!(all(target_arch = "x86_64", any(target_os = "windows", target_os = "linux"))),
+        "valid H.264 CQP is accepted on supported Windows/Linux x64 NVENC paths"
     );
     s.qp = Some(52);
     assert!(s.validate().is_err(), "H.264 CQP above 51 must be rejected");
