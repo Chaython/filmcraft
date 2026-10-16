@@ -745,6 +745,18 @@ impl ExportSettings {
                 return Err(ExportError::Unsupported("NVENC AV1 CQP supports only limited-range 4:2:0 8-bit or 10-bit output".into()));
             }
         }
+        if self.format == Format::Av1
+            && (self.multipass || self.spatial_aq || self.lookahead.is_some())
+            && (self.av1_full_range
+                || !matches!(
+                    self.av1_pixel_format,
+                    Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10
+                ))
+        {
+            return Err(ExportError::Unsupported(
+                "AV1 NVENC rate controls require limited-range 4:2:0 8-bit or 10-bit output".into(),
+            ));
+        }
         if nvenc_controls && !cfg!(all(target_os = "windows", target_arch = "x86_64")) {
             return Err(ExportError::Unsupported("CQP, multipass, spatial AQ and lookahead currently require Windows x64 NVENC".into()));
         }

@@ -570,6 +570,34 @@ fn av1_cqp_uses_the_full_av1_qp_range_and_rejects_software_fallbacks() {
 }
 
 #[test]
+fn av1_nvenc_controls_reject_full_range_and_non_420_formats() {
+    let cases = [
+        ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            spatial_aq: true,
+            av1_pixel_format: Av1PixelFormat::Yuv422p10,
+            ..Default::default()
+        },
+        ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            lookahead: Some(16),
+            av1_full_range: true,
+            ..Default::default()
+        },
+    ];
+    for settings in cases {
+        match settings.validate() {
+            Err(ExportError::Unsupported(message)) => {
+                assert!(message.contains("AV1 NVENC rate controls"), "{message}");
+            }
+            other => panic!("unsupported AV1 rate-control combination was accepted: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn h264_cqp_uses_the_h264_qp_range() {
     let mut s =
         ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(51), ..Default::default() };

@@ -733,17 +733,28 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     let labels: Vec<(String, bool)> = formats.iter().map(|p| (p.label().to_owned(), true)).collect();
                     if let Some(i) = combo(ui, reg, "export.video.av1PixelFormat", s.av1_pixel_format.label(), &labels, 180.0) {
                         s.av1_pixel_format = formats[i];
-                        if s.bitrate_mode == BitrateMode::Cqp && !matches!(s.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10) {
-                            s.bitrate_mode = BitrateMode::Vbr1Pass;
+                        if s.av1_full_range
+                            || !matches!(s.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10)
+                        {
+                            if s.bitrate_mode == BitrateMode::Cqp {
+                                s.bitrate_mode = BitrateMode::Vbr1Pass;
+                            }
+                            s.multipass = false;
+                            s.spatial_aq = false;
+                            s.lookahead = None;
                         }
                     }
                 });
                 row(ui, t, tl!("Full Range"), |ui| {
                     if check(ui, reg, "export.video.av1FullRange", &mut s.av1_full_range, "Full (0–max) instead of studio/video levels")
                         && s.av1_full_range
-                        && s.bitrate_mode == BitrateMode::Cqp
                     {
-                        s.bitrate_mode = BitrateMode::Vbr1Pass;
+                        if s.bitrate_mode == BitrateMode::Cqp {
+                            s.bitrate_mode = BitrateMode::Vbr1Pass;
+                        }
+                        s.multipass = false;
+                        s.spatial_aq = false;
+                        s.lookahead = None;
                     }
                 });
                 row(ui, t, tl!("Encoder"), |ui| {
@@ -794,6 +805,14 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
                     .collect();
                 if let Some(i) = combo(ui, reg, "export.video.bitrateMode", s.bitrate_mode.label(), &labels, 140.0) {
                     s.bitrate_mode = o[i];
+                    if s.bitrate_mode == BitrateMode::Crf {
+                        s.multipass = false;
+                        s.spatial_aq = false;
+                        s.lookahead = None;
+                    } else if s.bitrate_mode == BitrateMode::Cqp {
+                        s.multipass = false;
+                        s.lookahead = None;
+                    }
                 }
             });
             if s.bitrate_mode == BitrateMode::Crf {
@@ -874,15 +893,17 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             }
             if nvenc_rate_control {
                 row(ui, t, tl!("Multipass"), |ui| {
-                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp, |ui| {
+                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp && s.bitrate_mode != BitrateMode::Crf, |ui| {
                         check(ui, reg, "export.video.multipass", &mut s.multipass, "");
                     });
                 });
                 row(ui, t, tl!("Spatial AQ"), |ui| {
-                    check(ui, reg, "export.video.spatialAq", &mut s.spatial_aq, "");
+                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Crf, |ui| {
+                        check(ui, reg, "export.video.spatialAq", &mut s.spatial_aq, "");
+                    });
                 });
                 row(ui, t, tl!("Lookahead"), |ui| {
-                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp, |ui| {
+                    ui.add_enabled_ui(s.bitrate_mode != BitrateMode::Cqp && s.bitrate_mode != BitrateMode::Crf, |ui| {
                         let mut on = s.lookahead.is_some();
                         if check(ui, reg, "export.video.lookaheadOn", &mut on, "") {
                             s.lookahead = on.then_some(16);
