@@ -496,4 +496,28 @@ mod tests {
         assert!(config(Format::H264, 70_000, 64, FrameRate::FPS_24, &s).is_err());
         assert!(config(Format::H264, 64, 70_000, FrameRate::FPS_24, &s).is_err());
     }
+    #[test]
+    fn av1_cqp_preserves_8_to_255_qp_and_only_applies_supported_controls() {
+        let s = ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            av1_pixel_format: filmcraft_export::Av1PixelFormat::Yuv420p10,
+            bitrate_mode: BitrateMode::Cqp,
+            qp: Some(255),
+            multipass: true,
+            spatial_aq: true,
+            lookahead: Some(20),
+            ..Default::default()
+        };
+        let cfg = config(Format::Av1, 640, 360, FrameRate::FPS_24, &s).expect("AV1 CQP configuration");
+        assert!(cfg.cqp);
+        assert_eq!(cfg.qp, 255, "AV1 QP must not be clamped to the H.264/HEVC maximum");
+        assert!(!cfg.multipass, "multipass does not apply to constant-QP mode");
+        assert!(cfg.spatial_aq);
+        assert_eq!(cfg.lookahead, None, "lookahead is disabled for constant-QP mode");
+
+        let bad = ExportSettings { qp: Some(256), ..s };
+        assert!(config(Format::Av1, 640, 360, FrameRate::FPS_24, &bad).is_err());
+    }
+
 }
