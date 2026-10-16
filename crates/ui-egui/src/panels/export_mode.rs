@@ -709,7 +709,9 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             let av1_nvenc_eligible = !s.av1_full_range && matches!(s.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10);
             // This fork's AV1 NVENC path is currently Windows-only. CQP and the advanced controls
             // must not be offered when the export would silently fall back to software.
-            let nvenc_rate_control = cfg!(target_os = "windows") && (hevc || s.hardware_encoding == HardwareEncoding::Auto) && (!av1 || av1_nvenc_eligible);
+            let nvenc_rate_control = cfg!(all(target_os = "windows", target_arch = "x86_64"))
+                && (hevc || s.hardware_encoding == HardwareEncoding::Auto)
+                && (!av1 || av1_nvenc_eligible);
             if hevc {
                 // the hardware encoder writes Main (8-bit 4:2:0), or Main 10 for HDR sequences where it can; level chosen by the encoder
                 let label = match (filmcraft_engine::export::hdr_available(Format::Hevc), seq_hdr && !s.sdr) {
