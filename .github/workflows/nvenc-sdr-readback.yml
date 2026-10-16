@@ -1,0 +1,83 @@
+name: NVENC SDR GPU readback integration
+
+on:
+  push:
+    branches: [nvenc-av1-sdr-gpu-readback]
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/gpu/**"
+      - "crates/export/**"
+      - "apps/filmcraft*/**"
+      - "crates/ui-egui/examples/bench/sections.rs"
+      - "Cargo.lock"
+      - ".github/workflows/nvenc-sdr-readback.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Push and pull_request events can target the same head commit. Share a concurrency key so
+# the duplicate run is cancelled instead of consuming a second hosted runner.
+concurrency:
+  group: nvenc-sdr-readback-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  gpu-sdr:
+    name: SDR readback / HDR-safe fallback (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux desktop build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libgtk-3-dev libdbus-1-dev pkg-config
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Check GPU, export, desktop and CLI
+        run: cargo check -p filmcraft-gpu -p filmcraft-export -p filmcraft-cli -p filmcraft --all-targets
+      # Hosted Windows runners fail the baseline FX compute-shader tests with the same FXC
+      # error as main; keep runtime parity on Linux and use Windows for compile/lint validation.
+      # Serialize GPU tests to avoid overloading the software adapter with concurrent pipelines.
+      - name: GPU export-renderer parity tests
+        if: runner.os == 'Linux'
+        run: cargo test -p filmcraft-gpu --lib export_renderer::tests -- --test-threads=1
+      - name: GPU / CPU export parity tests
+        if: runner.os == 'Linux'
+        run: cargo test -p filmcraft-gpu --test export_pipeline -- --test-threads=1
+      - name: Export pipeline unit tests
+        if: runner.os == 'Linux'
+        run: cargo test -p filmcraft-export --lib -- --test-threads=1
+      # The three HDR regressions used to fail immediately on the software H.264 encoder's
+      # accidental AV1-only guard. Isolate them on Windows so a platform-specific hang is bounded
+      # and identifiable rather than stalling the whole export test suite.
+      - name: Export unit tests excluding isolated HDR regressions (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        run: cargo test -p filmcraft-export --lib -- --test-threads=1 --skip hdr_with_audio_is_the_same_file_when_the_memory_budget_caps_the_batch --skip the_software_h264_sei_is_the_static_metadata_laid_out_as_messages --skip hdr_exports_signal_pq_and_hlg
+      - name: H.264 HDR SEI regression (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        run: cargo test -p filmcraft-export --lib the_software_h264_sei_is_the_static_metadata_laid_out_as_messages -- --nocapture --test-threads=1
+      - name: HDR PQ/HLG export regression (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        run: cargo test -p filmcraft-export --lib hdr_exports_signal_pq_and_hlg -- --nocapture --test-threads=1
+      - name: HDR export determinism regression (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        run: cargo test -p filmcraft-export --lib hdr_with_audio_is_the_same_file_when_the_memory_budget_caps_the_batch -- --nocapture --test-threads=1
+      - name: Strict lint
+        run: cargo clippy --no-deps -p filmcraft-gpu -p filmcraft-export -p filmcraft-cli -p filmcraft --all-targets -- -D warnings
