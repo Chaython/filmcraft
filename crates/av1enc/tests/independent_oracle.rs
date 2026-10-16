@@ -1,0 +1,77 @@
+//! Independent AV1 conformance smoke test for the experimental native encoder.
+//! FFmpeg/libdav1d is used ONLY as an external test oracle, never as product code.
+//! This intentionally tests changing images and P-frames, not only all-128 input.
+use std::process::{Command, Stdio};
+
+use filmcraft_av1enc::{Encoder, EncoderConfig, YuvFrame};
+
+fn ivf(w: u16, h: u16, fps: u32, packets: &[Vec<u8>]) -> Vec<u8> {
+    let mut ivf = Vec::new();
+    ivf.extend_from_slice(b"DKIF");
+    ivf.extend_from_slice(&0u16.to_le_bytes());
+    ivf.extend_from_slice(&32u16.to_le_bytes());
+    ivf.extend_from_slice(b"AV01");
+    ivf.extend_from_slice(&w.to_le_bytes());
+    ivf.extend_from_slice(&h.to_le_bytes());
+    ivf.extend_from_slice(&fps.to_le_bytes());
+    ivf.extend_from_slice(&1u32.to_le_bytes());
+    ivf.extend_from_slice(&(packets.len() as u32).to_le_bytes());
+    ivf.extend_from_slice(&0u32.to_le_bytes());
+    for (i, packet) in packets.iter().enumerate() {
+        ivf.extend_from_slice(&(packet.len() as u32).to_le_bytes());
+        ivf.extend_from_slice(&(i as u64).to_le_bytes());
+        ivf.extend_from_slice(packet);
+    }
+    ivf
+}
+
+#[test]
+fn native_changing_frames_decode_independently() {
+    let Some(ffmpeg) = filmcraft_testkit::ffmpeg_or_skip("native AV1 changing-frame conformance") else {
+        assert_ne!(std::env::var("FILMCRAFT_REQUIRE_AV1_ORACLE").as_deref(), Ok("1"), "FFmpeg with libdav1d is mandatory for this test");
+        return;
+    };
+    let (w, h) = (128usize, 128usize);
+    let mut encoder = Encoder::new(EncoderConfig::new(w as u32, h as u32, 24, 10)).unwrap();
+    let mut packets = Vec::new();
+    let mut input_planes = Vec::new();
+    for i in 0..5usize {
+        let mut y = vec![0u8; w * h];
+        for row in 0..h {
+            for col in 0..w {
+                // Gradient plus a moving edge and a scene change.
+                y[row * w + col] = match i {
+                    0 => ((col * 2 + row) % 256) as u8,
+                    1 => ((col * 2 + row + 17) % 256) as u8,
+                    2 => if col < 64 { 40 } else { 220 },
+                    3 => if col < 80 { 40 } else { 220 },
+                    _ => ((row * 2 + col) % 256) as u8,
+                };
+            }
+        }
+        let u = vec![96u8; w * h / 4];
+        let v = vec![160u8; w * h / 4];
+        let frame = YuvFrame { y: &y, u: &u, v: &v, y_stride: w, uv_stride: w / 2 };
+        let packet = encoder.encode(&frame, (i * 1000) as i64).unwrap();
+        packets.push(packet.data);
+        input_planes.push(y);
+    }
+    let bytes = ivf(w as u16, h as u16, 24, &packets);
+    let path = filmcraft_testkit::temp_path(&filmcraft_testkit::fixtures_dir("av1enc-external-oracle").join("changing.ivf"));
+    std::fs::write(&path, bytes).unwrap();
+    let decoded = Command::new(ffmpeg)
+        .args(["-hide_banner", "-v", "error", "-xerror", "-c:v", "libdav1d", "-f", "ivf", "-i"])
+        .arg(&path)
+        .args(["-pix_fmt", "yuv420p", "-f", "rawvideo", "-"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert!(decoded.status.success(), "independent libdav1d rejected native AV1 output: {}", String::from_utf8_lossy(&decoded.stderr));
+    let frame_size = w * h * 3 / 2;
+    assert_eq!(decoded.stdout.len(), 5 * frame_size, "independent decoder must produce 5 complete frames");
+    for (i, frame) in decoded.stdout.chunks_exact(frame_size).enumerate() {
+        let psnr = filmcraft_av1enc::compute_psnr(&input_planes[i], &frame[..w * h]).unwrap();
+        assert!(psnr > 9.0, "independently decoded native AV1 frame {i} has poor luma quality: {psnr:.2} dB");
+    }
+}
