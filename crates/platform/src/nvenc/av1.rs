@@ -122,6 +122,22 @@ pub fn insert_metadata(packet: &[u8], metadata: &[u8]) -> Result<Vec<u8>, String
     Err("NVENC AV1 packet has no frame".into())
 }
 
+/// NVENC is configured for AV1 Main, non-monochrome 4:2:0 only. Do not write an
+/// `av1C` record that describes a different stream just because the sequence header parses.
+fn validate_nvenc_sequence_header(header: &SequenceHeader, ten_bit: bool) -> Result<(), String> {
+    if header.profile != 0 {
+        return Err("NVENC AV1 sequence profile is not Main (profile 0)".into());
+    }
+    let expected_depth = if ten_bit { 10 } else { 8 };
+    if header.color.bit_depth != expected_depth {
+        return Err("NVENC AV1 sequence bit depth differs from the input configuration".into());
+    }
+    if header.color.mono_chrome || header.color.subsampling_x != 1 || header.color.subsampling_y != 1 {
+        return Err("NVENC AV1 sequence chroma layout differs from non-monochrome 4:2:0".into());
+    }
+    Ok(())
+}
+
 /// Build an `av1C` record from the sequence header parameter bytes NVENC wrote.
 pub fn av1_config(sequence_params: &[u8], ten_bit: bool) -> Result<Av1Config, String> {
     if sequence_params.is_empty() {
@@ -131,9 +147,7 @@ pub fn av1_config(sequence_params: &[u8], ten_bit: bool) -> Result<Av1Config, St
 
     let parsed = SequenceHeader::parse_checked(payload).map_err(|e| format!("parsing AV1 sequence header: {e:?}"))?;
 
-    if parsed.color.bit_depth != if ten_bit { 10 } else { 8 } {
-        return Err("NVENC AV1 sequence bit depth differs from the input configuration".into());
-    }
+    validate_nvenc_sequence_header(&parsed, ten_bit)?;
     let high_bitdepth = parsed.color.bit_depth > 8;
     let config = Av1Config {
         seq_profile: parsed.profile,
@@ -180,6 +194,36 @@ mod tests {
         }
         assert!(insert_metadata(&[0x0a, 0xff], &bytes).is_err());
         assert_eq!(insert_metadata(&[0x12, 0, 0x32, 1, 0], &bytes).unwrap(), [vec![0x12, 0], bytes, vec![0x32, 1, 0]].concat());
+    }
+
+    fn synthetic_sequence_header(profile: u8, bit_depth: u8, mono_chrome: bool, subsampling_x: u8, subsampling_y: u8) -> SequenceHeader {
+        let mut header = SequenceHeader::default();
+        header.profile = profile;
+        header.color.bit_depth = bit_depth;
+        header.color.mono_chrome = mono_chrome;
+        header.color.subsampling_x = subsampling_x;
+        header.color.subsampling_y = subsampling_y;
+        header
+    }
+
+    #[test]
+    fn av1c_validation_rejects_profiles_and_chroma_nvenc_did_not_request() {
+        for bit_depth in [8, 10] {
+            let valid = synthetic_sequence_header(0, bit_depth, false, 1, 1);
+            assert!(validate_nvenc_sequence_header(&valid, bit_depth == 10).is_ok());
+        }
+
+        let cases = [
+            ("non-Main profile", synthetic_sequence_header(1, 8, false, 1, 1), false),
+            ("monochrome output", synthetic_sequence_header(0, 8, true, 1, 1), false),
+            ("4:2:2 output", synthetic_sequence_header(0, 8, false, 1, 0), false),
+            ("4:4:4 output", synthetic_sequence_header(0, 8, false, 0, 0), false),
+            ("unexpected 10-bit output", synthetic_sequence_header(0, 10, false, 1, 1), false),
+            ("unexpected 8-bit output", synthetic_sequence_header(0, 8, false, 1, 1), true),
+        ];
+        for (case, header, ten_bit) in cases {
+            assert!(validate_nvenc_sequence_header(&header, ten_bit).is_err(), "{case} must be rejected");
+        }
     }
 
     #[test]
