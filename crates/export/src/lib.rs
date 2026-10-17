@@ -737,8 +737,17 @@ impl ExportSettings {
         if self.effects.image_overlay.enabled && self.effects.image_overlay.path.trim().is_empty() {
             return Err(ExportError::Unsupported("image overlay: no image file chosen".into()));
         }
+        if let Some(depth) = self.lookahead
+            && !(1..=30).contains(&depth)
+        {
+            return Err(ExportError::Unsupported("NVENC lookahead must be between 1 and 30 frames".into()));
+        }
+        let advanced_nvenc_controls = self.multipass || self.spatial_aq || self.lookahead.is_some();
+        if advanced_nvenc_controls && !matches!(self.format, Format::H264 | Format::Hevc | Format::Av1) {
+            return Err(ExportError::Unsupported("NVENC multipass, spatial AQ and lookahead are available only for H.264, H.265 or AV1 exports".into()));
+        }
         let nvenc_controls = matches!(self.format, Format::H264 | Format::Hevc | Format::Av1)
-            && (self.bitrate_mode == BitrateMode::Cqp || self.multipass || self.spatial_aq || self.lookahead.is_some());
+            && (self.bitrate_mode == BitrateMode::Cqp || advanced_nvenc_controls);
         if self.bitrate_mode == BitrateMode::Cqp {
             if !matches!(self.format, Format::H264 | Format::Hevc | Format::Av1) {
                 return Err(ExportError::Unsupported("CQP is available only for H.264, H.265 or AV1 NVENC exports".into()));
