@@ -717,10 +717,7 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             let nvenc_rate_control_platform = true;
             #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
             let nvenc_rate_control_platform = !av1 && !hevc;
-            #[cfg(not(any(
-                all(target_arch = "x86_64", target_os = "windows"),
-                all(target_arch = "x86_64", target_os = "linux")
-            )))]
+            #[cfg(not(any(all(target_arch = "x86_64", target_os = "windows"), all(target_arch = "x86_64", target_os = "linux"))))]
             let nvenc_rate_control_platform = false;
             let nvenc_rate_control = nvenc_rate_control_platform && (hevc || s.hardware_encoding == HardwareEncoding::Auto) && (!av1 || av1_nvenc_eligible);
             if hevc {
