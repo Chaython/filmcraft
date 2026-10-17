@@ -85,16 +85,42 @@ pub(crate) fn obus(data: &[u8]) -> Vec<(u8, &[u8])> {
     out
 }
 
-/// What an AV1 sequence header fixes about the decoded pictures: the profile, the maximum size,
-/// the bit depth and the chroma format. The colour description (primaries, transfer, matrix and
-/// range), the chroma sample position and the coding tool flags are deliberately excluded: a
-/// muxer may write a minimal `av1C` whose sequence header omits `color_description_present` (the
-/// description then defaults to "unspecified") while the in-band one carries the real one, and
-/// decoders follow the in-band header. `None` when it does not parse.
-fn av1_picture_format(seq: &[u8]) -> Option<(u8, u32, u32, u8, bool, u8, u8)> {
+/// What an AV1 sequence header fixes about the decoded pictures. Colour is compared after
+/// resolving it to the application's effective output colour: an unspecified description and
+/// explicit BT.709 are equivalent here, but PQ/HLG, matrix, primaries or range changes are not.
+/// Keep chroma sample position and separate-UV coding state in the comparison as well. `None`
+/// when the sequence header does not parse.
+#[derive(PartialEq)]
+struct Av1PictureFormat {
+    profile: u8,
+    width: u32,
+    height: u32,
+    bit_depth: u8,
+    num_planes: u8,
+    mono_chrome: bool,
+    subsampling_x: u8,
+    subsampling_y: u8,
+    chroma_sample_position: u8,
+    separate_uv_delta_q: bool,
+    color: ColorInfo,
+}
+
+fn av1_picture_format(seq: &[u8]) -> Option<Av1PictureFormat> {
     let h = filmcraft_av1::SequenceHeader::parse(seq).ok()?;
     let c = &h.color;
-    Some((h.profile, h.max_frame_width, h.max_frame_height, c.bit_depth, c.mono_chrome, c.subsampling_x, c.subsampling_y))
+    Some(Av1PictureFormat {
+        profile: h.profile,
+        width: h.max_frame_width,
+        height: h.max_frame_height,
+        bit_depth: c.bit_depth,
+        num_planes: c.num_planes,
+        mono_chrome: c.mono_chrome,
+        subsampling_x: c.subsampling_x,
+        subsampling_y: c.subsampling_y,
+        chroma_sample_position: c.chroma_sample_position,
+        separate_uv_delta_q: c.separate_uv_delta_q,
+        color: av1_color(h.max_frame_width, h.max_frame_height, c.matrix_coefficients, c.transfer_characteristics, c.color_primaries, c.color_range),
+    })
 }
 
 /// VP9 colour as our decoder reports it: `color_space` and range from the bitstream, transfer and
@@ -263,10 +289,10 @@ impl FrameStreamInfo {
     /// hands the stream to our software decoder.
     pub fn parameters_changed(&self, sample: &[u8]) -> bool {
         match self.codec {
-            // Only the picture format depends on the hardware session. Encoders such as SVT-AV1
-            // put provisional coding tool flags in `av1C`, and muxers may omit its colour
-            // description while the in-band sequence header carries the real one. Decoders follow
-            // the in-band header, so these differences do not require a software fallback.
+            // Encoders such as SVT-AV1 put provisional coding tool flags in `av1C`, and a
+            // muxer may omit its colour description while the in-band header carries explicit
+            // BT.709. Treat those as equal only when their effective output colour matches;
+            // genuinely different colour (including HDR/range changes) still falls back.
             FrameCodec::Av1 => obus(sample).into_iter().any(|(t, p)| {
                 if t != 1 {
                     return false;
