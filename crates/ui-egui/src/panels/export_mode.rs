@@ -713,11 +713,15 @@ fn video_section(ui: &mut egui::Ui, reg: &mut Reg, s: &mut ExportSettings, t: &T
             }
             let av1_nvenc_eligible = !s.av1_full_range && matches!(s.av1_pixel_format, Av1PixelFormat::Yuv420p8 | Av1PixelFormat::Yuv420p10);
             // AV1/HEVC NVENC are Windows-only here; H.264 NVENC also supports Linux x64.
-            let nvenc_rate_control_platform = if av1 || hevc {
-                cfg!(all(target_os = "windows", target_arch = "x86_64"))
-            } else {
-                cfg!(all(target_arch = "x86_64", any(target_os = "windows", target_os = "linux")))
-            };
+            #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+            let nvenc_rate_control_platform = true;
+            #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+            let nvenc_rate_control_platform = !av1 && !hevc;
+            #[cfg(not(any(
+                all(target_arch = "x86_64", target_os = "windows"),
+                all(target_arch = "x86_64", target_os = "linux")
+            )))]
+            let nvenc_rate_control_platform = false;
             let nvenc_rate_control = nvenc_rate_control_platform && (hevc || s.hardware_encoding == HardwareEncoding::Auto) && (!av1 || av1_nvenc_eligible);
             if hevc {
                 // the hardware encoder writes Main (8-bit 4:2:0), or Main 10 for HDR sequences where it can; level chosen by the encoder
