@@ -96,7 +96,7 @@ struct Av1PictureFormat {
     width: u32,
     height: u32,
     bit_depth: u8,
-    num_planes: u8,
+    num_planes: usize,
     mono_chrome: bool,
     subsampling_x: u8,
     subsampling_y: u8,
