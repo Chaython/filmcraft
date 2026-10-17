@@ -746,8 +746,8 @@ impl ExportSettings {
         if advanced_nvenc_controls && !matches!(self.format, Format::H264 | Format::Hevc | Format::Av1) {
             return Err(ExportError::Unsupported("NVENC multipass, spatial AQ and lookahead are available only for H.264, H.265 or AV1 exports".into()));
         }
-        let nvenc_controls = matches!(self.format, Format::H264 | Format::Hevc | Format::Av1)
-            && (self.bitrate_mode == BitrateMode::Cqp || advanced_nvenc_controls);
+        let nvenc_controls =
+            matches!(self.format, Format::H264 | Format::Hevc | Format::Av1) && (self.bitrate_mode == BitrateMode::Cqp || advanced_nvenc_controls);
         if self.bitrate_mode == BitrateMode::Cqp {
             if !matches!(self.format, Format::H264 | Format::Hevc | Format::Av1) {
                 return Err(ExportError::Unsupported("CQP is available only for H.264, H.265 or AV1 NVENC exports".into()));
@@ -779,10 +779,7 @@ impl ExportSettings {
         let nvenc_rate_control_supported = matches!(self.format, Format::H264 | Format::Hevc | Format::Av1);
         #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
         let nvenc_rate_control_supported = self.format == Format::H264;
-        #[cfg(not(any(
-            all(target_arch = "x86_64", target_os = "windows"),
-            all(target_arch = "x86_64", target_os = "linux")
-        )))]
+        #[cfg(not(any(all(target_arch = "x86_64", target_os = "windows"), all(target_arch = "x86_64", target_os = "linux"))))]
         let nvenc_rate_control_supported = false;
         if nvenc_controls && !nvenc_rate_control_supported {
             return Err(ExportError::Unsupported("NVENC CQP, multipass, spatial AQ and lookahead are unavailable on this platform".into()));
