@@ -766,11 +766,15 @@ impl ExportSettings {
         {
             return Err(ExportError::Unsupported("AV1 NVENC rate controls require limited-range 4:2:0 8-bit or 10-bit output".into()));
         }
-        let nvenc_rate_control_supported = match self.format {
-            Format::H264 => cfg!(all(target_arch = "x86_64", any(target_os = "windows", target_os = "linux"))),
-            Format::Hevc | Format::Av1 => cfg!(all(target_os = "windows", target_arch = "x86_64")),
-            _ => false,
-        };
+        #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+        let nvenc_rate_control_supported = matches!(self.format, Format::H264 | Format::Hevc | Format::Av1);
+        #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+        let nvenc_rate_control_supported = self.format == Format::H264;
+        #[cfg(not(any(
+            all(target_arch = "x86_64", target_os = "windows"),
+            all(target_arch = "x86_64", target_os = "linux")
+        )))]
+        let nvenc_rate_control_supported = false;
         if nvenc_controls && !nvenc_rate_control_supported {
             return Err(ExportError::Unsupported("NVENC CQP, multipass, spatial AQ and lookahead are unavailable on this platform".into()));
         }
