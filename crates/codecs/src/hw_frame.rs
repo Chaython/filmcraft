@@ -85,11 +85,16 @@ pub(crate) fn obus(data: &[u8]) -> Vec<(u8, &[u8])> {
     out
 }
 
-/// What an AV1 sequence header fixes about the pictures: profile, maximum size and the colour
-/// configuration (bit depth, chroma format, colour description). `None` when it does not parse.
-fn av1_format(seq: &[u8]) -> Option<(u8, u32, u32, filmcraft_av1::ColorConfig)> {
+/// What an AV1 sequence header fixes about the decoded pictures: the profile, the maximum size,
+/// the bit depth and the chroma format. The colour description (primaries, transfer, matrix and
+/// range), the chroma sample position and the coding tool flags are deliberately excluded: a
+/// muxer may write a minimal `av1C` whose sequence header omits `color_description_present` (the
+/// description then defaults to "unspecified") while the in-band one carries the real one, and
+/// decoders follow the in-band header. `None` when it does not parse.
+fn av1_picture_format(seq: &[u8]) -> Option<(u8, u32, u32, u8, bool, u8, u8)> {
     let h = filmcraft_av1::SequenceHeader::parse(seq).ok()?;
-    Some((h.profile, h.max_frame_width, h.max_frame_height, h.color))
+    let c = &h.color;
+    Some((h.profile, h.max_frame_width, h.max_frame_height, c.bit_depth, c.mono_chrome, c.subsampling_x, c.subsampling_y))
 }
 
 /// VP9 colour as our decoder reports it: `color_space` and range from the bitstream, transfer and
@@ -258,10 +263,20 @@ impl FrameStreamInfo {
     /// hands the stream to our software decoder.
     pub fn parameters_changed(&self, sample: &[u8]) -> bool {
         match self.codec {
-            // Only what the picture format depends on counts: encoders such as SVT-AV1 put a
-            // provisional sequence header in `av1C` whose coding tool flags (CDEF, restoration,
-            // warped motion…) differ from the in-band one, and decoders follow the in-band one.
-            FrameCodec::Av1 => obus(sample).into_iter().any(|(t, p)| t == 1 && self.sequence_header.as_deref().is_none_or(|s| av1_format(s) != av1_format(p))),
+            // Only the picture format depends on the hardware session. Encoders such as SVT-AV1
+            // put provisional coding tool flags in `av1C`, and muxers may omit its colour
+            // description while the in-band sequence header carries the real one. Decoders follow
+            // the in-band header, so these differences do not require a software fallback.
+            FrameCodec::Av1 => obus(sample).into_iter().any(|(t, p)| {
+                if t != 1 {
+                    return false;
+                }
+                match (self.sequence_header.as_deref().and_then(av1_picture_format), av1_picture_format(p)) {
+                    (Some(a), Some(b)) => a != b,
+                    // Without two parsed headers we cannot confirm the session format.
+                    _ => true,
+                }
+            }),
             FrameCodec::Vp9 => {
                 self.picture_params(sample).is_some_and(|p| p.size != self.size || p.bit_depth != self.bit_depth || p.subsampling != self.subsampling)
             }
@@ -281,6 +296,13 @@ mod tests {
     /// stream: they differ only in coding tool flags.
     const AV1C: [u8; 14] = [0x0a, 0x0c, 0x02, 0x00, 0x00, 0x2d, 0x6a, 0x67, 0xfd, 0x9e, 0x01, 0x7c, 0x20, 0x20];
     const IN_BAND: [u8; 14] = [0x0a, 0x0c, 0x02, 0x00, 0x00, 0x2d, 0x6a, 0x67, 0xfd, 0x9e, 0x35, 0x7c, 0xe0, 0x20];
+    /// Real 2560×1440 60 fps AV1 headers: av1C omits the colour description (unspecified), while
+    /// the in-band header carries BT.709. Profile, geometry, depth and chroma are identical.
+    const REAL_AV1C: [u8; 14] = [0x0a, 0x0c, 0x00, 0x00, 0x00, 0x62, 0xea, 0x7f, 0xec, 0xff, 0x40, 0x09, 0xf4, 0x01];
+    const REAL_IN_BAND: [u8; 26] = [
+        0x0a, 0x18, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xf3, 0x00, 0x00, 0x0c, 0x5d, 0x4f, 0xfd, 0x9f, 0xe8, 0x01, 0x3e, 0x88,
+        0x08, 0x08, 0x08, 0x20,
+    ];
 
     fn info() -> FrameStreamInfo {
         let c = filmcraft_isobmff::Av1Config {
@@ -311,5 +333,39 @@ mod tests {
         assert!(i.parameters_changed(&[0x0a, 0x02, 0xe0, 0x00]));
         // no sequence header in the sample: nothing changed
         assert!(!i.parameters_changed(&[0x12, 0x00]));
+    }
+
+    fn real_info() -> FrameStreamInfo {
+        let c = filmcraft_isobmff::Av1Config {
+            seq_profile: 0,
+            seq_level_idx_0: 0,
+            seq_tier_0: false,
+            high_bitdepth: false,
+            twelve_bit: false,
+            monochrome: false,
+            chroma_subsampling_x: true,
+            chroma_subsampling_y: true,
+            chroma_sample_position: 0,
+            initial_presentation_delay_minus_one: None,
+            config_obus: REAL_AV1C.to_vec(),
+        };
+        FrameStreamInfo::from_av1(&c, (0, 0)).unwrap()
+    }
+
+    #[test]
+    fn av1_colour_description_may_differ_without_hardware_fallback() {
+        let i = real_info();
+        assert_eq!((i.size, i.bit_depth), ((2560, 1440), 8));
+        assert!(!i.parameters_changed(&REAL_AV1C), "the same header");
+        assert!(!i.parameters_changed(&REAL_IN_BAND), "only the colour description differs");
+    }
+
+    #[test]
+    fn av1_unparseable_or_missing_stored_header_is_conservative() {
+        let i = info();
+        assert!(i.parameters_changed(&[0x0a, 0x02, 0xe0, 0x00]), "unparseable sequence header");
+        let no_stored_header = FrameStreamInfo::for_tests(FrameCodec::Av1, 0, 8, (1, 1), (2560, 1440));
+        assert!(no_stored_header.parameters_changed(&REAL_IN_BAND), "cannot compare without stored av1C");
+        assert!(!no_stored_header.parameters_changed(&[0x12, 0x00]), "no sequence header to compare");
     }
 }
