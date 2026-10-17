@@ -267,6 +267,13 @@ fn av1_checked_color_candidate_checks_sequence_trailing_and_frame_alignment_bits
 }
 
 #[test]
+fn av1_effective_hdr_color_change_still_requires_fallback() {
+    let info = stream(&Sequence::default());
+    let pq = Sequence { color: (9, 16, 9), ..Default::default() };
+    assert!(info.parameters_changed(&sample(&pq)), "BT.2020/PQ must not be treated as equivalent to BT.709");
+}
+
+#[test]
 fn av1_checked_color_candidate_declines_zero_layer_obu_extensions() {
     let info = stream(&Sequence::default());
     let changed = Sequence { color: (9, 16, 9), ..Default::default() };
