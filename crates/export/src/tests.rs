@@ -542,3 +542,178 @@ impl FrameRenderer for FakeRenderer {
         Some(filmcraft_render::Image::new(320, 180))
     }
 }
+
+#[test]
+fn av1_cqp_uses_the_full_av1_qp_range_and_rejects_software_fallbacks() {
+    let mut s =
+        ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(255), ..Default::default() };
+    assert_eq!(
+        s.validate().is_ok(),
+        cfg!(all(target_os = "windows", target_arch = "x86_64")),
+        "valid AV1 CQP is accepted only on the supported Windows x64 NVENC path"
+    );
+
+    s.qp = Some(256);
+    assert!(s.validate().is_err(), "AV1 CQP above 255 must be rejected");
+
+    s.qp = Some(128);
+    s.av1_full_range = true;
+    assert!(s.validate().is_err(), "unsupported full-range AV1 must not fall back silently");
+
+    s.av1_full_range = false;
+    s.av1_pixel_format = Av1PixelFormat::Yuv422p10;
+    assert!(s.validate().is_err(), "AV1 NVENC CQP is limited to 4:2:0 8/10-bit");
+
+    s.av1_pixel_format = Av1PixelFormat::Yuv420p8;
+    s.hardware_encoding = HardwareEncoding::Off;
+    assert!(s.validate().is_err(), "CQP must not silently select software AV1");
+}
+
+#[test]
+fn cqp_rejects_multipass_and_lookahead() {
+    let cases = [
+        ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            bitrate_mode: BitrateMode::Cqp,
+            multipass: true,
+            ..Default::default()
+        },
+        ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            bitrate_mode: BitrateMode::Cqp,
+            lookahead: Some(16),
+            ..Default::default()
+        },
+    ];
+    for settings in cases {
+        match settings.validate() {
+            Err(ExportError::Unsupported(message)) => {
+                assert!(message.contains("CQP cannot be combined with multipass or lookahead"), "{message}");
+            }
+            other => panic!("incompatible CQP settings were accepted: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn hdr_av1_pixel_format_upgrade_preserves_chroma_subsampling() {
+    assert_eq!(Av1PixelFormat::Yuv420p8.at_least_10_bit(), Av1PixelFormat::Yuv420p10);
+    assert_eq!(Av1PixelFormat::Yuv422p8.at_least_10_bit(), Av1PixelFormat::Yuv422p10);
+    assert_eq!(Av1PixelFormat::Yuv444p8.at_least_10_bit(), Av1PixelFormat::Yuv444p10);
+    assert_eq!(Av1PixelFormat::Yuv420p12.at_least_10_bit(), Av1PixelFormat::Yuv420p12);
+    assert_eq!(Av1PixelFormat::Yuv422p12.at_least_10_bit(), Av1PixelFormat::Yuv422p12);
+    assert_eq!(Av1PixelFormat::Yuv444p12.at_least_10_bit(), Av1PixelFormat::Yuv444p12);
+}
+
+#[test]
+fn h264_two_pass_rejects_nvenc_only_controls() {
+    let settings = ExportSettings {
+        format: Format::H264,
+        hardware_encoding: HardwareEncoding::Auto,
+        bitrate_mode: BitrateMode::Vbr2Pass,
+        spatial_aq: true,
+        ..Default::default()
+    };
+    match settings.validate() {
+        Err(ExportError::Unsupported(message)) => {
+            assert!(message.contains("two-pass VBR cannot be combined with NVENC-only rate controls"), "{message}");
+        }
+        other => panic!("software two-pass VBR with NVENC-only controls was accepted: {other:?}"),
+    }
+}
+
+#[test]
+fn av1_nvenc_controls_reject_full_range_and_non_420_formats() {
+    let cases = [
+        ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            spatial_aq: true,
+            av1_pixel_format: Av1PixelFormat::Yuv422p10,
+            ..Default::default()
+        },
+        ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, lookahead: Some(16), av1_full_range: true, ..Default::default() },
+    ];
+    for settings in cases {
+        match settings.validate() {
+            Err(ExportError::Unsupported(message)) => {
+                assert!(message.contains("AV1 NVENC rate controls"), "{message}");
+            }
+            other => panic!("unsupported AV1 rate-control combination was accepted: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn lookahead_depth_is_validated_before_nvenc_clamps_it() {
+    for depth in [0, 31, u32::MAX] {
+        let settings = ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, lookahead: Some(depth), ..Default::default() };
+        let error = settings.validate().unwrap_err().to_string();
+        assert!(error.contains("lookahead must be between 1 and 30"), "depth {depth}: {error}");
+    }
+
+    let settings = ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, lookahead: Some(30), ..Default::default() };
+    if cfg!(all(target_arch = "x86_64", any(target_os = "windows", target_os = "linux"))) {
+        assert!(settings.validate().is_ok(), "the maximum supported UI depth should validate");
+    } else {
+        assert!(
+            !settings.validate().unwrap_err().to_string().contains("lookahead must be between 1 and 30"),
+            "valid depth should reach platform capability validation"
+        );
+    }
+}
+
+#[test]
+fn non_video_formats_reject_nvenc_only_controls() {
+    let settings = ExportSettings { format: Format::ProRes, hardware_encoding: HardwareEncoding::Auto, multipass: true, ..Default::default() };
+    let error = settings.validate().unwrap_err().to_string();
+    assert!(error.contains("available only for H.264, H.265 or AV1"), "{error}");
+}
+
+#[test]
+fn h264_cqp_uses_the_h264_qp_range() {
+    let mut s =
+        ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(51), ..Default::default() };
+    assert_eq!(
+        s.validate().is_ok(),
+        cfg!(all(target_arch = "x86_64", any(target_os = "windows", target_os = "linux"))),
+        "valid H.264 CQP is accepted on supported Windows/Linux x64 NVENC paths"
+    );
+    s.qp = Some(52);
+    assert!(s.validate().is_err(), "H.264 CQP above 51 must be rejected");
+}
+
+#[test]
+fn software_encoders_reject_nvenc_only_rate_controls() {
+    let h264_cases = [
+        ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(23), ..Default::default() },
+        ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, multipass: true, ..Default::default() },
+        ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, spatial_aq: true, ..Default::default() },
+        ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, lookahead: Some(16), ..Default::default() },
+    ];
+    for settings in &h264_cases {
+        match h264_factory(Format::H264, 640, 360, FrameRate::FPS_24, settings) {
+            Some(Err(ExportError::Unsupported(message))) => assert!(message.contains("NVENC"), "{message}"),
+            _ => panic!("software H.264 must reject NVENC-only controls instead of silently encoding VBR"),
+        }
+    }
+
+    let av1_cases = [
+        ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(128), ..Default::default() },
+        ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, multipass: true, ..Default::default() },
+        ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, spatial_aq: true, ..Default::default() },
+        ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, lookahead: Some(16), ..Default::default() },
+    ];
+    for settings in &av1_cases {
+        match ffmpeg_av1::factory(Format::Av1, 640, 360, FrameRate::FPS_24, settings) {
+            Some(Err(ExportError::Unsupported(message))) => assert!(message.contains("NVENC"), "{message}"),
+            _ => panic!("software AV1 must reject NVENC-only controls instead of silently encoding VBR"),
+        }
+        match native_av1_factory(Format::Av1, 640, 360, FrameRate::FPS_24, settings) {
+            Some(Err(ExportError::Unsupported(message))) => assert!(message.contains("NVENC"), "{message}"),
+            _ => panic!("experimental software AV1 must reject NVENC-only controls instead of silently encoding VBR"),
+        }
+    }
+}

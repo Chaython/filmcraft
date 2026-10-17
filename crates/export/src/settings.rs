@@ -103,8 +103,11 @@ pub enum BitrateMode {
     /// Variable bitrate, two passes (the picture is rendered and analysed first).
     Vbr2Pass,
     /// Constant quality: every frame is coded at [`ExportSettings::crf`] and the bitrate follows the
-    /// picture (H.264, built-in encoder only).
+    /// picture (software encoders that support it).
     Crf,
+    /// Constant quantizer: fixed QP (NVENC hardware only; AV1 uses its 0–255 quantizer range).
+    #[serde(rename = "cqp")]
+    Cqp,
 }
 
 impl BitrateMode {
@@ -114,6 +117,7 @@ impl BitrateMode {
             BitrateMode::Vbr1Pass => "VBR, 1 pass",
             BitrateMode::Vbr2Pass => "VBR, 2 pass",
             BitrateMode::Crf => "CRF (constant quality)",
+            BitrateMode::Cqp => "CQP (constant quantizer)",
         }
     }
 }
@@ -690,6 +694,7 @@ impl ExportSettings {
                     v += &match self.bitrate_mode {
                         BitrateMode::Cbr => format!(", {}", mbps(r.target_kbps)),
                         BitrateMode::Crf => format!(" {}", self.crf),
+                        BitrateMode::Cqp => format!(", QP {}", self.qp.unwrap_or(23)),
                         _ => format!(", Target {}, Max {}", mbps(r.target_kbps), mbps(r.max_kbps)),
                     };
                     v += &format!(", keyframe every {} frames", r.keyint);
@@ -700,12 +705,15 @@ impl ExportSettings {
                     v += &format!(", {profile} (hardware encoder), {}", self.bitrate_mode.label());
                     v += &match self.bitrate_mode {
                         BitrateMode::Cbr => format!(", {}", mbps(r.target_kbps)),
+                        BitrateMode::Cqp => format!(", QP {}", self.qp.unwrap_or(23)),
                         _ => format!(", Target {}, Max {}", mbps(r.target_kbps), mbps(r.max_kbps)),
                     };
                     v += &format!(", keyframe every {} frames", r.keyint);
                 }
                 Format::Av1 => {
-                    let encoder = if self.hardware_encoding == HardwareEncoding::Off || self.bitrate_mode == BitrateMode::Crf {
+                    let encoder = if self.bitrate_mode == BitrateMode::Cqp {
+                        "NVENC hardware (CQP; no software fallback)"
+                    } else if self.hardware_encoding == HardwareEncoding::Off || self.bitrate_mode == BitrateMode::Crf {
                         "libaom-av1 software (FFmpeg)"
                     } else {
                         "hardware Auto (libaom-av1 fallback)"
@@ -720,6 +728,7 @@ impl ExportSettings {
                     v += &match self.bitrate_mode {
                         BitrateMode::Cbr => format!(", {}", mbps(r.target_kbps)),
                         BitrateMode::Crf => format!(" {}", self.crf),
+                        BitrateMode::Cqp => format!(", QP {}", self.qp.unwrap_or(128)),
                         _ => format!(", Target {}, Max {}", mbps(r.target_kbps), mbps(r.max_kbps)),
                     };
                     v += &format!(", keyframe every {} frames", r.keyint);

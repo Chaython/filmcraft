@@ -1623,3 +1623,18 @@ fn own_importer_reads_32_bit_flac_at_full_scale() {
         }
     }
 }
+
+#[test]
+fn av1_cqp_settings_round_trip_and_summary_use_the_av1_qp_range() {
+    let settings =
+        ExportSettings { format: Format::Av1, hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(200), ..Default::default() };
+    let json = serde_json::to_value(&settings).unwrap();
+    assert_eq!(json["bitrateMode"], "cqp");
+    assert_eq!(json["qp"], 200);
+    let decoded: ExportSettings = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded.bitrate_mode, BitrateMode::Cqp);
+    assert_eq!(decoded.qp, Some(200));
+    let summary = decoded.summary(1920, 1080, FrameRate::FPS_24, 48_000, Tick(10 * TICKS_PER_SECOND));
+    assert!(summary.video.contains("CQP (constant quantizer)"), "{}", summary.video);
+    assert!(summary.video.contains("QP 200"), "{}", summary.video);
+}

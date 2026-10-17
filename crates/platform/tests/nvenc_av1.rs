@@ -102,6 +102,7 @@ fn main10_encodes_hdr_signal_and_repeated_keyframes() {
         level: None,
         sar: None,
         bframes: false,
+        ..Default::default()
     };
     let signal = Signal {
         primaries: 9,
@@ -184,6 +185,7 @@ fn dropping_pending_av1_main_and_main10_pictures() {
             level: None,
             sar: None,
             bframes: true,
+            ..Default::default()
         };
         let y8 = vec![96u8; 256 * 128];
         let uv8 = vec![128u8; 256 * 128 / 4];

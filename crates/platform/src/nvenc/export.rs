@@ -173,7 +173,7 @@ fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -
     if (hevc || av1) && (hdr && (s.signal.primaries != 9 || s.signal.matrix != 9) || !hdr && s.signal != ColorSignal::default()) {
         return Err(format!("the colour signal {:?} (H.265 and AV1 here are BT.709, or BT.2020 with PQ / HLG)", s.signal));
     }
-    if !matches!(s.h264_pass, H264Pass::Single) || ((hevc || av1) && s.bitrate_mode == BitrateMode::Vbr2Pass) {
+    if !matches!(s.h264_pass, H264Pass::Single) || s.bitrate_mode == BitrateMode::Vbr2Pass {
         return Err("two-pass VBR".into());
     }
     if s.bitrate_mode == BitrateMode::Crf {
@@ -200,6 +200,12 @@ fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -
     };
     let fps = (num, den);
     let kbps = s.bitrate_kbps.max(100);
+    let cqp = s.bitrate_mode == BitrateMode::Cqp;
+    let max_qp = if av1 { 255 } else { 51 };
+    if cqp && s.qp.is_some_and(|qp| qp > max_qp) {
+        return Err(format!("{} CQP must be between 0 and {max_qp}", format.label()));
+    }
+    let qp = s.qp.unwrap_or(if av1 { 128 } else { 23 });
     Ok(Config {
         width: w,
         height: h,
@@ -207,6 +213,11 @@ fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -
         bitrate_kbps: kbps,
         max_bitrate_kbps: s.max_bitrate_kbps.filter(|m| *m >= kbps).unwrap_or_else(|| kbps.saturating_add(kbps / 2)),
         cbr: s.bitrate_mode == BitrateMode::Cbr,
+        cqp,
+        qp,
+        multipass: s.multipass && !cqp,
+        spatial_aq: s.spatial_aq,
+        lookahead: if cqp { None } else { s.lookahead },
         keyint: s.keyframe_distance.filter(|k| *k > 0).unwrap_or_else(|| (f64::from(fps.0) / f64::from(fps.1) * 2.0).round().max(1.0) as u32),
         profile: match (av1, hevc, s.h264_profile) {
             (true, _, _) if hdr || s.av1_pixel_format == filmcraft_export::Av1PixelFormat::Yuv420p10 => Profile::Av1Main10,
@@ -262,10 +273,17 @@ fn factory_with(
     if s.hardware_encoding != HardwareEncoding::Auto || format != Format::H264 {
         return None;
     }
+    let requires_nvenc_rate_control = s.bitrate_mode == BitrateMode::Cqp || s.multipass || s.spatial_aq || s.lookahead.is_some();
     let declined = |why: &str| {
         log::info!("hardware encoding declined: {why}");
         filmcraft_export::note_hw_encode_declined();
-        None
+        if requires_nvenc_rate_control {
+            Some(Err(ExportError::Unsupported(format!(
+                "H.264 CQP, multipass, spatial AQ and lookahead require an available NVENC encoder; software H.264 cannot honor these settings: {why}"
+            ))))
+        } else {
+            None
+        }
     };
     let cfg = match config(format, w, h, rate, s) {
         Ok(c) => c,
@@ -316,6 +334,7 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
     {
         return None;
     }
+    let requires_nvenc_rate_control = s.bitrate_mode == BitrateMode::Cqp || s.multipass || s.spatial_aq || s.lookahead.is_some();
     let declined = |why: &str| {
         log::info!("hardware AV1 encoding declined: {why}");
         filmcraft_export::note_hw_encode_declined();
@@ -323,7 +342,7 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
     };
     let cfg = match config(Format::Av1, w, h, rate, s) {
         Ok(c) => c,
-        Err(why) if !s.signal.is_hdr() => {
+        Err(why) if !s.signal.is_hdr() && !requires_nvenc_rate_control => {
             log::info!("NVENC AV1 declined; trying the SDR software encoder: {why}");
             return None;
         }
@@ -335,11 +354,11 @@ fn av1_factory(w: u32, h: u32, rate: FrameRate, s: &ExportSettings) -> Option<Re
             Some(Ok(Box::new(new_encoder(enc, w, h, rate, s.signal))))
         }
         // no AV1 encoder here at all: not a hardware attempt, the export's own "encoder not available" error
-        Err(why) if !super::av1_available() => {
+        Err(why) if !super::av1_available() && !requires_nvenc_rate_control => {
             log::info!("no hardware AV1 encoder: {why}");
             None
         }
-        Err(why) if !s.signal.is_hdr() || s.av1_pixel_format == filmcraft_export::Av1PixelFormat::Yuv420p10 => {
+        Err(why) if (!s.signal.is_hdr() || s.av1_pixel_format == filmcraft_export::Av1PixelFormat::Yuv420p10) && !requires_nvenc_rate_control => {
             log::info!("NVENC AV1 session unavailable; trying software encoder: {why}");
             None
         }
@@ -380,6 +399,59 @@ mod tests {
         s.h264_pass = H264Pass::Single;
         s.field_order = FieldOrder::UpperFirst;
         declined(Format::H264, 640, 360, &s);
+    }
+
+    #[test]
+    fn av1_cqp_and_advanced_controls_map_to_nvenc_config() {
+        let cqp = ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            bitrate_mode: BitrateMode::Cqp,
+            qp: Some(200),
+            ..Default::default()
+        };
+        let cfg = config(Format::Av1, 640, 360, FrameRate::FPS_24, &cqp).unwrap();
+        assert!(cfg.cqp);
+        assert_eq!(cfg.qp, 200);
+        assert!(!cfg.multipass);
+        assert_eq!(cfg.lookahead, None);
+
+        let vbr = ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            multipass: true,
+            spatial_aq: true,
+            lookahead: Some(16),
+            ..Default::default()
+        };
+        let cfg = config(Format::Av1, 640, 360, FrameRate::FPS_24, &vbr).unwrap();
+        assert!(!cfg.cqp);
+        assert!(cfg.multipass);
+        assert!(cfg.spatial_aq);
+        assert_eq!(cfg.lookahead, Some(16));
+    }
+
+    #[test]
+    fn two_pass_vbr_declines_nvenc_for_software_h264() {
+        let s = ExportSettings { hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Vbr2Pass, ..Default::default() };
+        assert!(factory_with(Format::H264, 640, 360, FrameRate::FPS_24, &s, |_| panic!("two-pass VBR must use the software encoder")).is_none());
+    }
+
+    #[test]
+    fn missing_driver_is_an_error_when_nvenc_rate_control_is_required() {
+        let cases = [
+            ExportSettings { hardware_encoding: HardwareEncoding::Auto, bitrate_mode: BitrateMode::Cqp, qp: Some(23), ..Default::default() },
+            ExportSettings { hardware_encoding: HardwareEncoding::Auto, multipass: true, ..Default::default() },
+            ExportSettings { hardware_encoding: HardwareEncoding::Auto, spatial_aq: true, ..Default::default() },
+            ExportSettings { hardware_encoding: HardwareEncoding::Auto, lookahead: Some(16), ..Default::default() },
+        ];
+        for s in &cases {
+            let result = factory_with(Format::H264, 640, 360, FrameRate::FPS_24, s, |_| Err("no NVIDIA encoder driver".into()));
+            let Some(Err(ExportError::Unsupported(message))) = result else {
+                panic!("NVENC-only rate controls must not fall back to software H.264");
+            };
+            assert!(message.contains("NVENC"), "{message}");
+        }
     }
 
     #[test]
@@ -484,5 +556,28 @@ mod tests {
         let s = ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, ..Default::default() };
         assert!(config(Format::H264, 70_000, 64, FrameRate::FPS_24, &s).is_err());
         assert!(config(Format::H264, 64, 70_000, FrameRate::FPS_24, &s).is_err());
+    }
+    #[test]
+    fn av1_cqp_preserves_8_to_255_qp_and_only_applies_supported_controls() {
+        let s = ExportSettings {
+            format: Format::Av1,
+            hardware_encoding: HardwareEncoding::Auto,
+            av1_pixel_format: filmcraft_export::Av1PixelFormat::Yuv420p10,
+            bitrate_mode: BitrateMode::Cqp,
+            qp: Some(255),
+            multipass: true,
+            spatial_aq: true,
+            lookahead: Some(20),
+            ..Default::default()
+        };
+        let cfg = config(Format::Av1, 640, 360, FrameRate::FPS_24, &s).expect("AV1 CQP configuration");
+        assert!(cfg.cqp);
+        assert_eq!(cfg.qp, 255, "AV1 QP must not be clamped to the H.264/HEVC maximum");
+        assert!(!cfg.multipass, "multipass does not apply to constant-QP mode");
+        assert!(cfg.spatial_aq);
+        assert_eq!(cfg.lookahead, None, "lookahead is disabled for constant-QP mode");
+
+        let bad = ExportSettings { qp: Some(256), ..s };
+        assert!(config(Format::Av1, 640, 360, FrameRate::FPS_24, &bad).is_err());
     }
 }
