@@ -650,22 +650,12 @@ fn av1_nvenc_controls_reject_full_range_and_non_420_formats() {
 #[test]
 fn lookahead_depth_is_validated_before_nvenc_clamps_it() {
     for depth in [0, 31, u32::MAX] {
-        let settings = ExportSettings {
-            format: Format::H264,
-            hardware_encoding: HardwareEncoding::Auto,
-            lookahead: Some(depth),
-            ..Default::default()
-        };
+        let settings = ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, lookahead: Some(depth), ..Default::default() };
         let error = settings.validate().unwrap_err().to_string();
         assert!(error.contains("lookahead must be between 1 and 30"), "depth {depth}: {error}");
     }
 
-    let settings = ExportSettings {
-        format: Format::H264,
-        hardware_encoding: HardwareEncoding::Auto,
-        lookahead: Some(30),
-        ..Default::default()
-    };
+    let settings = ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, lookahead: Some(30), ..Default::default() };
     if cfg!(all(target_arch = "x86_64", any(target_os = "windows", target_os = "linux"))) {
         assert!(settings.validate().is_ok(), "the maximum supported UI depth should validate");
     } else {
@@ -678,12 +668,7 @@ fn lookahead_depth_is_validated_before_nvenc_clamps_it() {
 
 #[test]
 fn non_video_formats_reject_nvenc_only_controls() {
-    let settings = ExportSettings {
-        format: Format::ProRes,
-        hardware_encoding: HardwareEncoding::Auto,
-        multipass: true,
-        ..Default::default()
-    };
+    let settings = ExportSettings { format: Format::ProRes, hardware_encoding: HardwareEncoding::Auto, multipass: true, ..Default::default() };
     let error = settings.validate().unwrap_err().to_string();
     assert!(error.contains("available only for H.264, H.265 or AV1"), "{error}");
 }
