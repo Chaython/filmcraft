@@ -646,7 +646,6 @@ fn av1_nvenc_controls_reject_full_range_and_non_420_formats() {
     }
 }
 
-
 #[test]
 fn lookahead_depth_is_validated_before_nvenc_clamps_it() {
     for depth in [0, 31, u32::MAX] {
